@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{Binding, ButtonId};
+use openlogi_core::binding::{Action, Binding, ButtonId};
 use openlogi_core::bindings::{button_bindings_for, oshook_gestures_for};
 use openlogi_core::config::{
     Config, ConfigRevision, LightSettings, MouseProfileTarget, canonical_device_key,
@@ -592,12 +592,14 @@ impl Orchestrator {
     /// no enabled keyboard carries a real binding (an unbound key must never
     /// be diverted).
     ///
-    /// The bound keys *are* the divert set: every
-    /// [`ButtonId::Control`] in the
-    /// keyboard's effective bindings names the `0x1b04` control to divert, and
-    /// the capture session arms whichever of those the device's own control
-    /// table reports as divertable. No fixed key table sits in between, so a
-    /// keyboard OpenLogi has never seen is remappable the day it ships.
+    /// The bound keys *are* the capture set: every
+    /// [`ButtonId::Control`] in the keyboard's effective bindings names the
+    /// `0x1b04` control to divert, and the capture session arms whichever of
+    /// those the device's own control table reports as divertable. No fixed key
+    /// table sits in between, so a keyboard OpenLogi has never seen is
+    /// remappable the day it ships. [`ButtonId::Grid`] bindings join the same
+    /// session as the observed keypad grid keys — same binding gate, no
+    /// firmware writes.
     ///
     /// One session at a time, and only a keyboard with something bound can
     /// hold it: an online bound keyboard wins over an asleep one, so a stale
@@ -627,11 +629,13 @@ impl Orchestrator {
                     self.current_app.as_deref(),
                 );
                 let divert = keyboard_divert_set(&bindings);
-                (!divert.wanted.is_empty()).then_some(KeyboardCandidate {
-                    dev,
-                    bindings,
-                    divert,
-                })
+                (!divert.wanted.is_empty() || !divert.grid.is_empty()).then_some(
+                    KeyboardCandidate {
+                        dev,
+                        bindings,
+                        divert,
+                    },
+                )
             })
             .collect();
         let chosen = candidates
@@ -649,6 +653,7 @@ impl Orchestrator {
             config_key: chosen.dev.config_key.clone(),
             route: chosen.dev.route.clone()?,
             wanted: chosen.divert.wanted.clone(),
+            grid: chosen.divert.grid.clone(),
             bindings: chosen.bindings.clone(),
         })
     }
@@ -1467,30 +1472,42 @@ struct KeyboardCandidate<'a> {
     divert: KeyboardDivertSet,
 }
 
-/// The `0x1b04` controls a keyboard's bindings ask to divert, split into the
-/// ones the session will arm and the reserved ones it refuses.
+/// What the bindings ask a keyboard capture session to do: the `0x1b04`
+/// controls split into the ones the session will arm and the reserved ones it
+/// refuses, plus the keypad grid keys it will only ever observe.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct KeyboardDivertSet {
     wanted: BTreeMap<u16, ButtonId>,
     reserved: Vec<u16>,
+    grid: BTreeMap<u8, ButtonId>,
 }
 
-/// Which of `bindings` carry a stored binding on a keyboard control — a
-/// control is diverted whenever it is present at all, even as
-/// [`openlogi_core::binding::Action::None`] (which means "suppress this key," not "leave native"):
+/// Which of `bindings` the keyboard capture session takes over.
+///
+/// A control is diverted whenever it is stored at all, even as
+/// [`Action::None`] (which means "suppress this key," not "leave native"):
 /// `button_bindings_for` seeds no default for a [`ButtonId::Control`], so
-/// presence here is always an explicit user choice (#1747).
+/// presence here is always an explicit user choice (#1747). A keypad grid key
+/// is only observed — the session never diverts it, so it cannot suppress the
+/// key — and joins the set only when it carries a real action: a
+/// [`Binding::LongPress`] whatever its arms hold, or a single binding other
+/// than [`Action::None`].
 fn keyboard_divert_set(bindings: &BTreeMap<ButtonId, Binding>) -> KeyboardDivertSet {
     let mut set = KeyboardDivertSet::default();
-    for button in bindings.keys() {
+    for (button, binding) in bindings {
+        // A grid key's identity is its position, and the session observes it
+        // without writing anything.
+        if let Some(key) = button.grid_key() {
+            let bound =
+                matches!(binding, Binding::LongPress(_)) || binding.click_action() != Action::None;
+            if bound {
+                set.grid.insert(key.index(), *button);
+            }
+            continue;
+        }
         let Some(cid) = button.cid().map(openlogi_core::binding::Cid::raw) else {
             continue;
         };
-        // A keyboard key never seeds a default (see `ButtonId::ALL`'s own
-        // doc), so its presence here means the user explicitly bound it —
-        // even to `Action::None`, which means "suppress", not "leave
-        // native" (#1747). Only a key truly absent from the stored config
-        // is left on its firmware function.
         if is_reserved_keyboard_control(cid) {
             set.reserved.push(cid);
         } else {
