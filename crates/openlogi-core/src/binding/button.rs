@@ -9,13 +9,16 @@ use thiserror::Error;
 
 use super::control::Cid;
 
-/// One of the user-rebindable controls on a Logi device: a mouse hotspot, or
-/// a keyboard key addressed by its HID++ `0x1b04` control ID.
+/// One of the user-rebindable controls on a Logi device: a mouse hotspot,
+/// a keyboard key addressed by its HID++ `0x1b04` control ID, or a keypad grid
+/// key addressed by its [`GridKey`] position.
 ///
 /// The mouse variants are declared in physical front-to-side order;
 /// [`ButtonId::ALL`] is consumed by the default-binding generator and the
-/// popover trigger list. Keyboard keys are [`ButtonId::Control`] and stay out
-/// of that list: they seed no default and are never diverted until bound.
+/// popover trigger list. Keyboard keys are [`ButtonId::Control`] and grid keys
+/// are [`ButtonId::Grid`], both out of that list: keyboard keys seed no default
+/// and are never diverted until bound, and grid keys are observed only — the
+/// firmware reports them on a vendor report whatever the binding says.
 ///
 /// # Serialization
 ///
@@ -67,6 +70,11 @@ pub enum ButtonId {
     /// Logi metadata slot `SLOT_NAME_RIGHT_SCROLL_BUTTON`. Counterpart to
     /// [`ButtonId::WheelTiltLeft`].
     WheelTiltRight,
+    /// A key on a keypad's 3×3 LCD grid, addressed by its position. These keys
+    /// report through a vendor report rather than `0x1b04`, so they have no
+    /// control ID and no divertable state: bound or not, they emit nothing of
+    /// their own to the host, and OpenLogi only ever observes them.
+    Grid(GridKey),
     /// A keyboard key, by the HID++ `0x1b04` control it reports as. Diverted
     /// over HID++ while bound (the OS hook never sees these keys); left on its
     /// native firmware function otherwise.
@@ -109,6 +117,15 @@ impl ButtonId {
     pub const fn cid(self) -> Option<Cid> {
         match self {
             Self::Control(cid) => Some(cid),
+            _ => None,
+        }
+    }
+
+    /// The grid position this button addresses, for a keypad grid key.
+    #[must_use]
+    pub const fn grid_key(self) -> Option<GridKey> {
+        match self {
+            Self::Grid(key) => Some(key),
             _ => None,
         }
     }
@@ -208,7 +225,9 @@ impl ButtonId {
             ButtonId::HapticPanel => Self::UNIT_NAMES[10].1,
             ButtonId::WheelTiltLeft => Self::UNIT_NAMES[11].1,
             ButtonId::WheelTiltRight => Self::UNIT_NAMES[12].1,
-            ButtonId::Control(_) => return None,
+            // Grid keys and keyboard controls have no fixed name in this
+            // table; see [`GridKey::config_name`] and [`Cid::config_name`].
+            ButtonId::Grid(_) | ButtonId::Control(_) => return None,
         })
     }
 
@@ -217,6 +236,7 @@ impl ButtonId {
     pub fn config_name(self) -> Cow<'static, str> {
         match self {
             ButtonId::Control(cid) => cid.config_name(),
+            ButtonId::Grid(key) => Cow::Borrowed(key.config_name()),
             other => Cow::Borrowed(other.unit_name().unwrap_or_default()),
         }
     }
@@ -238,6 +258,7 @@ impl ButtonId {
             ButtonId::ThumbwheelScrollDown => "Thumb Wheel Down",
             ButtonId::GestureButton => "Gesture Button",
             ButtonId::HapticPanel => "Haptic Panel",
+            ButtonId::Grid(key) => return Cow::Borrowed(key.label()),
             ButtonId::Control(cid) => return cid.label(),
         })
     }
@@ -259,6 +280,7 @@ impl ButtonId {
             ButtonId::ThumbwheelScrollDown => "pointer.thumb_wheel_down",
             ButtonId::GestureButton => "actions.gesture_button",
             ButtonId::HapticPanel => "actions.haptic_panel",
+            ButtonId::Grid(key) => key.translation_key(),
             ButtonId::Control(cid) => cid.translation_key(),
         }
     }
@@ -267,6 +289,141 @@ impl ButtonId {
 impl fmt::Display for ButtonId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.label())
+    }
+}
+
+/// One position of a keypad's 3×3 key grid — currently the MX Creative
+/// Keypad's LCD keys, whose identity is their position because, unlike
+/// `0x1b04` controls, they carry no control ID.
+///
+/// The variants declare the firmware's own numbering: row-major from the
+/// top-left, so [`index`](Self::index) is exactly the byte the vendor report
+/// carries. That pinning was verified by a mapping run of the
+/// `openlogi-hid` grid-key probe (`crates/openlogi-hid/examples/mx_keypad_grid_probe.rs`,
+/// 2026-10): pressing the keys in physical row-major order reported the index
+/// sequence `1..=9`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum GridKey {
+    /// Row-major index 1.
+    TopLeft,
+    /// Row-major index 2.
+    TopMiddle,
+    /// Row-major index 3.
+    TopRight,
+    /// Row-major index 4.
+    MiddleLeft,
+    /// Row-major index 5.
+    Middle,
+    /// Row-major index 6.
+    MiddleRight,
+    /// Row-major index 7.
+    BottomLeft,
+    /// Row-major index 8.
+    BottomMiddle,
+    /// Row-major index 9.
+    BottomRight,
+}
+
+impl GridKey {
+    /// The nine keys in wire-index order — the iteration source for GUI grids
+    /// and for building a device's bindable key set.
+    pub const ALL: [GridKey; 9] = [
+        Self::TopLeft,
+        Self::TopMiddle,
+        Self::TopRight,
+        Self::MiddleLeft,
+        Self::Middle,
+        Self::MiddleRight,
+        Self::BottomLeft,
+        Self::BottomMiddle,
+        Self::BottomRight,
+    ];
+
+    /// The 1-based index the device's vendor report carries for this key.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        match self {
+            Self::TopLeft => 1,
+            Self::TopMiddle => 2,
+            Self::TopRight => 3,
+            Self::MiddleLeft => 4,
+            Self::Middle => 5,
+            Self::MiddleRight => 6,
+            Self::BottomLeft => 7,
+            Self::BottomMiddle => 8,
+            Self::BottomRight => 9,
+        }
+    }
+
+    /// The key with `index` as its wire index, or `None` off the grid.
+    #[must_use]
+    pub const fn from_index(index: u8) -> Option<Self> {
+        match index {
+            1 => Some(Self::TopLeft),
+            2 => Some(Self::TopMiddle),
+            3 => Some(Self::TopRight),
+            4 => Some(Self::MiddleLeft),
+            5 => Some(Self::Middle),
+            6 => Some(Self::MiddleRight),
+            7 => Some(Self::BottomLeft),
+            8 => Some(Self::BottomMiddle),
+            9 => Some(Self::BottomRight),
+            _ => None,
+        }
+    }
+
+    /// The persisted name, `grid` + the CamelCase position.
+    #[must_use]
+    pub const fn config_name(self) -> &'static str {
+        match self {
+            Self::TopLeft => "gridTopLeft",
+            Self::TopMiddle => "gridTopMiddle",
+            Self::TopRight => "gridTopRight",
+            Self::MiddleLeft => "gridMiddleLeft",
+            Self::Middle => "gridMiddle",
+            Self::MiddleRight => "gridMiddleRight",
+            Self::BottomLeft => "gridBottomLeft",
+            Self::BottomMiddle => "gridBottomMiddle",
+            Self::BottomRight => "gridBottomRight",
+        }
+    }
+
+    /// The inverse of [`Self::config_name`].
+    #[must_use]
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|key| key.config_name() == name)
+    }
+
+    /// Human-readable label for popovers and tooltips.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::TopLeft => "Grid Key (Top Left)",
+            Self::TopMiddle => "Grid Key (Top Middle)",
+            Self::TopRight => "Grid Key (Top Right)",
+            Self::MiddleLeft => "Grid Key (Middle Left)",
+            Self::Middle => "Grid Key (Middle)",
+            Self::MiddleRight => "Grid Key (Middle Right)",
+            Self::BottomLeft => "Grid Key (Bottom Left)",
+            Self::BottomMiddle => "Grid Key (Bottom Middle)",
+            Self::BottomRight => "Grid Key (Bottom Right)",
+        }
+    }
+
+    /// Stable catalog key for the localized key label.
+    #[must_use]
+    pub const fn translation_key(self) -> &'static str {
+        match self {
+            Self::TopLeft => "keyboard.grid_top_left",
+            Self::TopMiddle => "keyboard.grid_top_middle",
+            Self::TopRight => "keyboard.grid_top_right",
+            Self::MiddleLeft => "keyboard.grid_middle_left",
+            Self::Middle => "keyboard.grid_middle",
+            Self::MiddleRight => "keyboard.grid_middle_right",
+            Self::BottomLeft => "keyboard.grid_bottom_left",
+            Self::BottomMiddle => "keyboard.grid_bottom_middle",
+            Self::BottomRight => "keyboard.grid_bottom_right",
+        }
     }
 }
 
@@ -279,11 +436,13 @@ impl FromStr for ButtonId {
     type Err = ParseButtonIdError;
 
     /// The inverse of [`ButtonId::config_name`]: a mouse button's variant
-    /// name, a known control's catalog name, or `control:0x…`.
+    /// name, a grid key's position name, a known control's catalog name, or
+    /// `control:0x…`.
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         ButtonId::UNIT_NAMES
             .into_iter()
             .find_map(|(button, unit_name)| (unit_name == name).then_some(button))
+            .or_else(|| GridKey::from_config_name(name).map(Self::Grid))
             .or_else(|| Cid::from_config_name(name).map(ButtonId::Control))
             .ok_or_else(|| ParseButtonIdError(name.to_owned()))
     }
