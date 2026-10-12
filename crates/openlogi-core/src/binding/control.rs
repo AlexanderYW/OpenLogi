@@ -363,6 +363,21 @@ pub const KNOWN_CONTROLS: &[KnownControl] = &[
     ),
     known(0x01a5, "KeyDiamond", "Diamond Key", "keyboard.diamond_key"),
     known(0x01a6, "KeyStar", "Star Key", "keyboard.star_key"),
+    // The MX Creative Keypad's paging buttons. Both are divertable; the rest of
+    // the keypad's keys (its LCD grid) report through a vendor report, not
+    // 0x1b04, so they have no CIDs to catalog.
+    known(
+        0x01a1,
+        "KeyLeftPaging",
+        "Left Paging Button",
+        "keyboard.left_paging_key",
+    ),
+    known(
+        0x01a2,
+        "KeyRightPaging",
+        "Right Paging Button",
+        "keyboard.right_paging_key",
+    ),
 ];
 
 #[cfg(test)]
