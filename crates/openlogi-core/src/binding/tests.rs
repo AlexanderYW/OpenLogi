@@ -782,6 +782,46 @@ fn button_ids_persist_as_their_config_names() {
     assert_eq!(binding_roundtrip(bindings.clone()), bindings);
 }
 
+/// Grid keys persist by position name, and that table must be the same mapping
+/// the device layer reads the wire index through — both directions are locked.
+#[test]
+fn grid_keys_persist_by_position_name() {
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        ButtonId::Grid(GridKey::Middle),
+        Binding::Single(Action::Screenshot),
+    );
+    bindings.insert(
+        ButtonId::Grid(GridKey::BottomRight),
+        Binding::Single(Action::Copy),
+    );
+
+    let toml = toml::to_string_pretty(&BindingWrapper {
+        bindings: bindings.clone(),
+    })
+    .expect("serialize");
+    assert!(toml.contains("gridMiddle = \"Screenshot\""), "{toml}");
+    assert!(toml.contains("gridBottomRight = \"Copy\""), "{toml}");
+    assert_eq!(binding_roundtrip(bindings.clone()), bindings);
+}
+
+/// The row-major pinning the grid-key probe's mapping run verified: the
+/// declaration order is the wire order, indexes are exactly `1..=9`, and the
+/// name table is injective so config bindings can be keyed by it.
+#[test]
+fn grid_key_index_mapping_is_row_major_and_total() {
+    let mut names = std::collections::HashSet::new();
+    for (position, key) in GridKey::ALL.iter().enumerate() {
+        let index = u8::try_from(position).expect("nine keys") + 1;
+        assert_eq!(key.index(), index, "{key:?} wire index");
+        assert_eq!(GridKey::from_index(index), Some(*key));
+        assert!(names.insert(key.config_name()), "duplicate name");
+        assert_eq!(GridKey::from_config_name(key.config_name()), Some(*key));
+    }
+    assert_eq!(GridKey::from_index(0), None);
+    assert_eq!(GridKey::from_index(10), None);
+}
+
 #[test]
 fn the_original_key_names_still_load_as_controls() {
     // Files written by 0.7–0.8.9 name keyboard keys with these variants; the
