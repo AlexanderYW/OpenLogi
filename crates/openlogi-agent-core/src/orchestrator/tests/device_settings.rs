@@ -626,6 +626,39 @@ fn keyboard_spec_diverts_exactly_the_bound_controls() {
     assert_eq!(spec.config_key, "kbd");
 }
 
+/// Bound keypad grid keys carry the same gate as controls but change no
+/// firmware: they publish the spec — the observed set is capture identity —
+/// keyed by their wire index, and an `Action::None` one is left native like
+/// any other unbound key.
+#[test]
+fn grid_only_bindings_publish_their_index_set() {
+    let mut config = Config::default();
+    config.set_binding(
+        "keypad",
+        ButtonId::Grid(GridKey::Middle),
+        Binding::Single(Action::Screenshot),
+    );
+    config.set_binding(
+        "keypad",
+        ButtonId::Grid(GridKey::BottomRight),
+        Binding::Single(Action::None),
+    );
+    let mut orch = orchestrator(config);
+    let mut keypad = dev("keypad", 1, true);
+    keypad.kind = DeviceKind::Numpad;
+    orch.devices = vec![keypad];
+
+    let spec = orch
+        .keyboard_spec_for()
+        .expect("the bound grid key publishes a spec");
+    assert_eq!(
+        spec.grid,
+        // `Middle` is the vendor report's index 5.
+        BTreeMap::from([(5, ButtonId::Grid(GridKey::Middle))])
+    );
+    assert!(spec.wanted.is_empty(), "grid keys divert nothing");
+}
+
 #[test]
 fn keyboard_spec_is_absent_without_a_real_binding_or_for_a_disabled_keyboard() {
     let config = Config::default();

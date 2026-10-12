@@ -11,7 +11,7 @@ use super::{
 };
 use crate::hardware::WheelModeChange;
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{Action, Binding, ButtonId};
+use openlogi_core::binding::{Action, Binding, ButtonId, GridKey};
 use openlogi_core::config::{
     Config, DeviceConfig, LightSettings, LinkConfig, ScrollResolution, VerticalScrollSensitivity,
 };
