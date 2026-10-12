@@ -17,7 +17,7 @@ use std::sync::Arc;
 use openlogi_core::binding::{Binding, ButtonId};
 use openlogi_hid::{
     CaptureHost, CaptureSessionOutcome, CaptureSessionStop, CapturedInput, DeviceRoute,
-    PendingCaptureRestore, run_keyboard_capture_session,
+    KeyboardWanted, PendingCaptureRestore, run_keyboard_capture_session,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
@@ -31,9 +31,10 @@ use crate::receiver_access::{ReceiverRequestState, SessionReceiverLease};
 use crate::runtime::{ActionDispatcher, HidppSessionId};
 
 /// Everything the watcher needs to capture one keyboard: where it is, which
-/// `0x1b04` controls to divert (only keys carrying a real binding), and the
-/// per-key action map presses dispatch through. Rebuilt by the orchestrator on
-/// config / inventory / foreground-app changes.
+/// `0x1b04` controls to divert and which keypad grid keys to observe (only
+/// keys carrying a real binding), and the per-key action map presses dispatch
+/// through. Rebuilt by the orchestrator on config / inventory /
+/// foreground-app changes.
 ///
 /// `wanted` is part of the hardware target, so a per-app profile that binds a
 /// key the device-wide profile leaves native changes the divert set when that
@@ -49,6 +50,11 @@ pub struct KeyboardSpec {
     pub route: DeviceRoute,
     /// `0x1b04` control ID → button, for exactly the bound keys.
     pub wanted: BTreeMap<u16, ButtonId>,
+    /// Keypad grid keys → button, keyed by the wire index, for exactly the
+    /// bound keys. These change no firmware state, but — like `wanted` — they
+    /// change the capture identity, so binding or unbinding a grid key restarts
+    /// the session to re-register the observed set.
+    pub grid: BTreeMap<u8, ButtonId>,
     /// Effective per-key immediate or threshold map (per-app overlay applied).
     pub bindings: BTreeMap<ButtonId, Binding>,
 }
@@ -62,6 +68,7 @@ pub type SharedKeyboardSpec = watch::Receiver<Option<Arc<KeyboardSpec>>>;
 struct KeyboardTarget {
     route: DeviceRoute,
     wanted: BTreeMap<u16, ButtonId>,
+    grid: BTreeMap<u8, ButtonId>,
 }
 
 impl KeyboardTarget {
@@ -69,6 +76,7 @@ impl KeyboardTarget {
         Self {
             route: spec.route.clone(),
             wanted: spec.wanted.clone(),
+            grid: spec.grid.clone(),
         }
     }
 }
@@ -586,7 +594,10 @@ fn spawn_session(
     let session_events = channels.events.clone();
     let done_id = id.clone();
     let route = target.route.clone();
-    let wanted = target.wanted.clone();
+    let wanted = KeyboardWanted {
+        controls: target.wanted.clone(),
+        grid: target.grid.clone(),
+    };
     let device_io = channels.access.device_io.clone();
     tokio::spawn(async move {
         let _receiver_lease = receiver_lease;
