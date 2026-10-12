@@ -13,6 +13,7 @@ fn target() -> KeyboardTarget {
             product_id: 0xc548,
         },
         wanted: BTreeMap::new(),
+        grid: BTreeMap::new(),
     }
 }
 
@@ -55,6 +56,7 @@ async fn publication_and_receiver_request_change_wanted_state_immediately() {
         config_key: "keyboard-a".to_owned(),
         route: target().route,
         wanted: target().wanted,
+        grid: target().grid,
         bindings: dispatch(Action::MissionControl).bindings,
     };
 
@@ -185,6 +187,7 @@ async fn recovery_manager_waits_for_control_events_and_shutdown_between_retries(
             config_key: "keyboard-a".to_owned(),
             route: target().route,
             wanted: target().wanted,
+            grid: target().grid,
             bindings: dispatch(Action::MissionControl).bindings,
         })));
         let capture = CaptureChannelSlot::default();

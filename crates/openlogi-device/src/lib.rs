@@ -66,7 +66,8 @@ pub use session::host_switch::{
     run_host_switch_session, switch_linked_hosts,
 };
 pub use session::keyboard::{
-    RESERVED_KEYBOARD_CONTROLS, is_reserved_keyboard_control, run_keyboard_capture_session,
+    KeyboardWanted, RESERVED_KEYBOARD_CONTROLS, is_reserved_keyboard_control,
+    run_keyboard_capture_session,
 };
 pub use write::{
     Dpi, DpiCapabilities, DpiInfo, DpiLed, DpiTarget, EasySwitchHosts, EasySwitchSlot,
