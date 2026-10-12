@@ -252,6 +252,12 @@ impl Capabilities {
                 lighting: true,
                 ..Self::default()
             },
+            // A numpad's controls are HID++ buttons (page buttons / grid keys)
+            // — keep its Keys panel configurable before the first probe.
+            DeviceKind::Numpad => Self {
+                buttons: true,
+                ..Self::default()
+            },
             _ => Self::default(),
         }
     }
@@ -964,6 +970,11 @@ mod tests {
         assert!(mouse.buttons && mouse.pointer && !mouse.lighting);
         assert!(!mouse.thumbwheel);
         assert!(Capabilities::presumed_from_kind(DeviceKind::Keyboard).lighting);
+        // An unprobed numpad keeps its Keys panel: its controls are HID++
+        // buttons, so buttons=true — and it has nothing else to presume.
+        let numpad = Capabilities::presumed_from_kind(DeviceKind::Numpad);
+        assert!(numpad.buttons);
+        assert!(!numpad.pointer && !numpad.lighting);
         // An unidentified device presumes nothing — it must be measured.
         assert_eq!(
             Capabilities::presumed_from_kind(DeviceKind::Unknown),
