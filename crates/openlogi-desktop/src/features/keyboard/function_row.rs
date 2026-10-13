@@ -9,11 +9,13 @@
 //! Which keys appear is the asset's call (see [`key_points::key_surface`]): a
 //! depot with control markers shows the keyboard's own HID++ controls on the
 //! photo, each bound per device through [`AppState::commit_binding`] and
-//! diverted by the agent while bound; a markerless keypad shows its own
-//! keycaps drawn from the device model, bound the same per-device way; any
-//! other markerless device shows the OS-hook F-row, bound globally through
-//! [`AppState::commit_keyboard_binding`]. The panel lists the same action
-//! catalog the mouse picker uses, plus a Power User section.
+//! diverted by the agent while bound; a keypad whose depot marks its keys
+//! puts those keycaps on the device render itself; a markerless keypad shows
+//! its own keycaps drawn from the device model beside the render, bound the
+//! same per-device way; any other markerless device shows the OS-hook F-row,
+//! bound globally through [`AppState::commit_keyboard_binding`]. The panel
+//! lists the same action catalog the mouse picker uses, plus a Power User
+//! section.
 
 #![expect(
     clippy::needless_pass_by_value,
@@ -57,7 +59,9 @@ mod key_points;
 pub(crate) use key_points::KeyTarget;
 #[cfg(test)]
 use key_points::{EVEN_SPACING_END, EVEN_SPACING_START, key_x_fractions};
-use key_points::{KEYCAP_H, KEYCAP_PAGING_H, KEYCAP_W, KeySurface, key_surface, keypad_canvas};
+use key_points::{
+    KEYCAP_H, KEYCAP_PAGING_H, KEYCAP_W, KeySurface, is_paging_cid, key_surface, keypad_canvas,
+};
 
 /// Width of the config panel (CSS px) when a key is selected.
 const PANEL_W: f32 = 320.;
@@ -209,35 +213,26 @@ impl Render for FunctionRowView {
         });
 
         let viewport_h = f32::from(window.viewport_size().height);
-        let render_size = keyboard_render_size(asset, viewport_h);
         let image_path = asset.map(|asset| asset.image_path.clone());
-        // The photo holds the same height as the keycap canvas, so the pair
-        // sits on one alignment line. Sized here, with the rest of the
-        // asset-derived data, before the borrow of the app state ends.
+        let surface = key_surface(asset, kind);
+        let keypad = matches!(surface, KeySurface::Keypad(_));
+        // A depot-marked keypad puts its caps on the render itself: the
+        // keyboard's callout band cannot lay eleven bubbles across a
+        // portrait render, and the keys sit under the user's eyes already.
+        let keypad_photo =
+            matches!(surface, KeySurface::Photo(_)) && matches!(kind, DeviceKind::Numpad);
+        // The schematic keeps photo and keycaps on one alignment line.
         let photo = asset
             .filter(|asset| asset.png_height > 0)
             .map_or((0., 0.), |asset| {
                 asset_dimensions_for_png(asset, keypad_canvas().1, 360.)
             });
-        let surface = key_surface(asset, kind);
-        let keypad = matches!(surface, KeySurface::Keypad(_));
-        let slots: Vec<KeySlot> = surface
-            .slots()
-            .into_iter()
-            .enumerate()
-            .map(|(idx, layout)| {
-                let bound = state.and_then(|state| bound_action(state, &layout.target));
-                KeySlot {
-                    idx,
-                    label: layout.legend.into(),
-                    x_frac: layout.point.x_frac,
-                    y_frac: layout.point.y_frac,
-                    binding: binding_label(bound.as_ref()),
-                    binding_icon: bound.as_ref().map(action_icon_path),
-                    target: layout.target,
-                }
-            })
-            .collect();
+        let render_size = if keypad_photo {
+            keypad_photo_render_size(asset, viewport_h)
+        } else {
+            keyboard_render_size(asset, viewport_h)
+        };
+        let slots = key_slots_from_layouts(surface, state);
 
         // A stale selection can outlive a device switch to a shorter F-row;
         // drop it instead of indexing past the new slot list.
@@ -285,6 +280,11 @@ impl Render for FunctionRowView {
         // drawn keycaps.
         let device = if keypad {
             KeypadPane::new(slots.clone(), image_path, photo, view.clone())
+                .selected(selected)
+                .hovered(hovered)
+                .into_any_element()
+        } else if keypad_photo {
+            KeypadPhotoPane::new(slots.clone(), image_path, render_size, view.clone())
                 .selected(selected)
                 .hovered(hovered)
                 .into_any_element()
@@ -371,9 +371,32 @@ struct KeySlot {
     binding_icon: Option<&'static str>,
 }
 
-/// The action `target` is bound to in the selected device's open profile
-/// (a control or keypad key) or the global F-row map (a function key).
-/// `None` when the key is on its native function.
+/// One [`KeySlot`] per displayed key, each carrying the action it is bound
+/// to right now — the panes and the config panel render the same truth
+/// from the same source.
+fn key_slots_from_layouts(surface: KeySurface, state: Option<&AppState>) -> Vec<KeySlot> {
+    surface
+        .slots()
+        .into_iter()
+        .enumerate()
+        .map(|(idx, layout)| {
+            let bound = state.and_then(|state| bound_action(state, &layout.target));
+            KeySlot {
+                idx,
+                label: layout.legend.into(),
+                x_frac: layout.point.x_frac,
+                y_frac: layout.point.y_frac,
+                binding: binding_label(bound.as_ref()),
+                binding_icon: bound.as_ref().map(action_icon_path),
+                target: layout.target,
+            }
+        })
+        .collect()
+}
+
+/// The action `target` is bound to in the selected device's open profile:
+/// a per-device binding (a control or keypad key) or the global F-row map
+/// (a function key). `None` when the key is on its native function.
 fn bound_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
     match target {
         KeyTarget::Control(button) => state
@@ -624,6 +647,7 @@ impl RenderOnce for KeypadPane {
                 .children(self.slots.into_iter().map(move |slot| {
                     let highlighted = key_is_highlighted(slot.idx, selected, hovered);
                     KeyCap {
+                        cap: (KEYCAP_W, keycap_height(&slot.target)),
                         slot,
                         highlighted,
                         canvas,
@@ -642,29 +666,135 @@ impl RenderOnce for KeypadPane {
     }
 }
 
+/// A depot-marked keypad: the device render with its own keycaps drawn on
+/// the keys. The depot's markers name the physical key each cap sits on —
+/// the grid keys row-major, the paging controls at their printed places —
+/// so the click targets *are* the device, and the same cap, tooltip,
+/// binding, and selection machinery serves on either side of the seam.
+/// Nothing is invented here that the depot did not author.
+#[derive(IntoElement)]
+struct KeypadPhotoPane {
+    slots: Vec<KeySlot>,
+    image: Option<std::path::PathBuf>,
+    render_size: (f32, f32),
+    selected: Option<usize>,
+    hovered: Option<usize>,
+    view: Entity<FunctionRowView>,
+}
+
+impl KeypadPhotoPane {
+    fn new(
+        slots: Vec<KeySlot>,
+        image: Option<std::path::PathBuf>,
+        render_size: (f32, f32),
+        view: Entity<FunctionRowView>,
+    ) -> Self {
+        Self {
+            slots,
+            image,
+            render_size,
+            selected: None,
+            hovered: None,
+            view,
+        }
+    }
+
+    #[must_use]
+    fn selected(mut self, selected: impl Into<Option<usize>>) -> Self {
+        self.selected = selected.into();
+        self
+    }
+
+    #[must_use]
+    fn hovered(mut self, hovered: impl Into<Option<usize>>) -> Self {
+        self.hovered = hovered.into();
+        self
+    }
+}
+
+impl RenderOnce for KeypadPhotoPane {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let (img_w, img_h) = self.render_size;
+        let (selected, hovered) = (self.selected, self.hovered);
+        let view = self.view;
+        let pal = theme::palette(cx);
+
+        div()
+            .relative()
+            .w(px(img_w))
+            .h(px(img_h))
+            .child(image_or_fallback(self.image, img_w, img_h, &pal))
+            .children(self.slots.into_iter().map(move |slot| {
+                let highlighted = key_is_highlighted(slot.idx, selected, hovered);
+                let cap = overlay_cap(&slot.target, (img_w, img_h));
+                KeyCap {
+                    slot,
+                    highlighted,
+                    canvas: (img_w, img_h),
+                    cap,
+                    view: view.clone(),
+                }
+            }))
+    }
+}
+
+/// Cap size on the render, as fractions of the image. Calibrated against
+/// the render those markers were measured on: a cap sits inside the key it
+/// marks, so the render's chassis gaps stay readable between caps. Grid
+/// keys occupy the larger face; the paging controls are printed shorter.
+fn overlay_cap(target: &KeyTarget, render: (f32, f32)) -> (f32, f32) {
+    let (w_frac, h_frac) = match target {
+        KeyTarget::Control(button) if button.cid().is_some_and(is_paging_cid) => {
+            (PAGING_CAP_W_FRAC, PAGING_CAP_H_FRAC)
+        }
+        _ => (GRID_CAP_W_FRAC, GRID_CAP_H_FRAC),
+    };
+    (w_frac * render.0, h_frac * render.1)
+}
+
+const GRID_CAP_W_FRAC: f32 = 0.215;
+const GRID_CAP_H_FRAC: f32 = 0.155;
+const PAGING_CAP_W_FRAC: f32 = 0.225;
+const PAGING_CAP_H_FRAC: f32 = 0.115;
+
+/// The overlay render size: the portrait keypad render as tall as the
+/// viewport allows under the same reserve the keyboard path keeps, minus
+/// the callout band this pane never draws, capped at [`KEYBOARD_W`].
+fn keypad_photo_render_size(asset: Option<&ResolvedAsset>, viewport_h: f32) -> (f32, f32) {
+    let Some(asset) = asset.filter(|asset| asset.png_height > 0) else {
+        return FALLBACK_KEYBOARD_SIZE;
+    };
+    let target_h = (viewport_h - KEYS_VERTICAL_RESERVE).max(KEYBOARD_MIN_IMG_H);
+    asset_dimensions_for_png(asset, target_h, KEYBOARD_W)
+}
+
 /// One keycap: face, binding line, click behavior. The keycap itself is the
 /// click target — no bubble, no leader line — and it wears the same
-/// selected/hover treatment as the photo path's callout bubbles.
+/// selected/hover treatment as the photo path's callout bubbles. `canvas`
+/// is the space `slot.point` positions it in (the keycap canvas or the
+/// render); `cap` is its size in that space.
 #[derive(IntoElement)]
 struct KeyCap {
     slot: KeySlot,
     highlighted: bool,
     canvas: (f32, f32),
+    cap: (f32, f32),
     view: Entity<FunctionRowView>,
 }
 
 impl RenderOnce for KeyCap {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let (w, h) = self.canvas;
+        let (cap_w, cap_h) = self.cap;
         let pal = theme::palette(cx);
         let idx = self.slot.idx;
-        let (cap_h, glyph) = keycap_face(&self.slot.target);
+        let glyph = keycap_glyph(&self.slot.target);
         let highlighted = self.highlighted;
         let tooltip = self.slot.label.clone();
         let legend = self.slot.label;
         let binding = self.slot.binding;
         let binding_icon = self.slot.binding_icon;
-        let left = self.slot.x_frac * w - KEYCAP_W / 2.;
+        let left = self.slot.x_frac * w - cap_w / 2.;
         let top = self.slot.y_frac * h - cap_h / 2.;
         let view_hover = self.view.clone();
         let view_click = self.view;
@@ -675,7 +805,7 @@ impl RenderOnce for KeyCap {
             .absolute()
             .top(px(top))
             .left(px(left))
-            .w(px(KEYCAP_W))
+            .w(px(cap_w))
             .h(px(cap_h))
             .flex()
             .flex_col()
@@ -704,7 +834,7 @@ impl RenderOnce for KeyCap {
             })
             .child(
                 div()
-                    .max_w(px(KEYCAP_W - 8.))
+                    .max_w(px(cap_w - 8.))
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
@@ -723,7 +853,7 @@ impl RenderOnce for KeyCap {
             .child(binding_line(
                 binding,
                 binding_icon,
-                KEYCAP_W - 8.,
+                cap_w - 8.,
                 highlighted,
                 &pal,
             ))
@@ -737,15 +867,23 @@ impl RenderOnce for KeyCap {
     }
 }
 
-/// The keycap's face: height and glyph. Grid keys draw the position they
-/// physically occupy; paging keys, lower caps, draw their device legends.
-/// Controls outside those tables fall back to their localized name, never a
+/// The keycap's face: height and glyph. The schematic canvas sizes grid caps
+/// by that model; the photo overlay sizes its caps by the depot's markers.
+/// Controls outside the keypad tables draw their localized name, never a
 /// made-up glyph.
-fn keycap_face(target: &KeyTarget) -> (f32, Option<&'static str>) {
+fn keycap_height(target: &KeyTarget) -> f32 {
     match target {
-        KeyTarget::Grid(key) => (KEYCAP_H, Some(grid_glyph(*key))),
-        KeyTarget::Control(button) => (KEYCAP_PAGING_H, button.cid().and_then(paging_glyph)),
-        KeyTarget::FunctionKey(_) => (KEYCAP_H, None),
+        KeyTarget::Control(button) if button.cid().is_some_and(is_paging_cid) => KEYCAP_PAGING_H,
+        KeyTarget::Control(_) | KeyTarget::Grid(_) | KeyTarget::FunctionKey(_) => KEYCAP_H,
+    }
+}
+
+/// The glyph drawn on a cap's face.
+fn keycap_glyph(target: &KeyTarget) -> Option<&'static str> {
+    match target {
+        KeyTarget::Grid(key) => Some(grid_glyph(*key)),
+        KeyTarget::Control(button) => button.cid().and_then(paging_glyph),
+        KeyTarget::FunctionKey(_) => None,
     }
 }
 
