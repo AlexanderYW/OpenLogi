@@ -1,7 +1,7 @@
 use super::key_points::{KeyPoint, key_slots};
 use super::*;
 use openlogi_assets::{Assignment, Direction, ImageEntry, Metadata, Origin, Point};
-use openlogi_core::binding::ButtonId;
+use openlogi_core::binding::{ButtonId, GridKey};
 use openlogi_core::config::FunctionKey;
 use openlogi_core::device::DeviceKind;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 const FUNCTION_KEYS: [FunctionKey; 20] = FunctionKey::ALL;
 
 fn key_points(asset: Option<&ResolvedAsset>) -> Vec<KeyPoint> {
-    key_slots(asset)
+    key_slots(asset, DeviceKind::Keyboard)
         .into_iter()
         .map(|slot| slot.point)
         .collect()
@@ -50,9 +50,85 @@ fn fallback_key_positions_cover_the_full_top_row() {
     assert_eq!(positions.first().copied(), Some(EVEN_SPACING_START));
     assert_eq!(positions.last().copied(), Some(EVEN_SPACING_END));
     // Without markers the tab falls back to the OS-hook F-row.
-    let slots = key_slots(None);
+    let slots = key_slots(None, DeviceKind::Keyboard);
     assert!(matches!(slots[0].target, KeyTarget::FunctionKey(ref t) if t.to_string() == "esc"));
     assert_eq!(slots[1].legend, "F1");
+}
+
+/// A keypad has no F-row to bind — that row belongs to keyboards, and a
+/// chip of it would write a global binding for a key that exists on neither
+/// the device nor the plane. What a markerless keypad shows is what it has:
+/// its nine grid keys, then the paging controls OpenLogi catalogued.
+#[test]
+fn a_keypad_without_markers_gets_keycaps_not_the_global_f_row() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+    let slots = key_slots(None, DeviceKind::Numpad);
+
+    assert_eq!(slots.len(), 11, "nine grid keys and two paging keys");
+    assert!(
+        !slots
+            .iter()
+            .any(|slot| matches!(slot.target, KeyTarget::FunctionKey(_))),
+        "no keypad key binds to the global keyboard plane"
+    );
+    assert_eq!(slots[0].target, KeyTarget::Grid(GridKey::TopLeft));
+    assert_eq!(slots[0].legend, "Grid Key (Top Left)");
+    assert_eq!(slots[4].target, KeyTarget::Grid(GridKey::Middle));
+    assert_eq!(slots[4].legend, "Grid Key (Middle)");
+    assert_eq!(
+        slots[9].target,
+        KeyTarget::Control(ButtonId::control(0x01a1)),
+        "the paging row follows the grid, in left-to-right order"
+    );
+    assert_eq!(slots[9].legend, "Left Paging Button");
+    assert_eq!(
+        slots[10].target,
+        KeyTarget::Control(ButtonId::control(0x01a2))
+    );
+}
+
+/// Where the keycaps sit comes from the device model: the grid fills three
+/// rows in the same row-major order the firmware reports, and the paging row
+/// lies under the first two columns as it does on the chassis.
+#[test]
+fn keypad_keycaps_follow_the_device_layout() {
+    let slots = key_slots(None, DeviceKind::Numpad);
+
+    for row in 0..3 {
+        let y = slots[row * 3].point.y_frac;
+        for col in 0..3 {
+            let slot = &slots[row * 3 + col];
+            assert_approx_eq(slot.point.y_frac, y);
+            if col > 0 {
+                let left = &slots[row * 3 + col - 1];
+                assert!(left.point.x_frac < slot.point.x_frac, "left to right");
+            }
+        }
+        if row > 0 {
+            assert!(slots[row * 3].point.y_frac > slots[row * 3 - 3].point.y_frac);
+        }
+    }
+    // Paging: below the grid, lined up under columns one and two.
+    assert!(slots[9].point.y_frac > slots[6].point.y_frac);
+    assert_approx_eq(slots[9].point.x_frac, slots[6].point.x_frac);
+    assert_approx_eq(slots[10].point.x_frac, slots[7].point.x_frac);
+}
+
+/// A depot that ever ships control markers still wins the photo path over
+/// the schematic — kind alone doesn't force keycaps.
+#[test]
+fn control_markers_still_own_the_photo_path_on_a_numpad() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+    let asset = asset_with_controls(&[(0x01a1, 20.0, 80.0)]);
+    let slots = key_slots(Some(&asset), DeviceKind::Numpad);
+
+    assert!(
+        matches!(slots[0].target, KeyTarget::Control(_)),
+        "marked keys keep their marker points"
+    );
+    assert_eq!(slots.len(), 1);
 }
 
 /// A Logi depot with control markers shows the keyboard's own controls —
@@ -76,7 +152,7 @@ fn control_markers_become_control_slots_in_reading_order() {
         (0x00e9, 85.5, 13.8),
     ]);
 
-    let slots = key_slots(Some(&asset));
+    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
 
     assert_eq!(slots.len(), 10, "every marked control, no phantom F-keys");
     let targets: Vec<_> = slots.iter().map(|slot| slot.target.clone()).collect();
@@ -112,7 +188,7 @@ fn control_slots_read_row_by_row_and_name_unknown_controls_by_number() {
         (0x00d4, 63.0, 11.0),
     ]);
 
-    let slots = key_slots(Some(&asset));
+    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
 
     let legends: Vec<&str> = slots.iter().map(|slot| slot.legend.as_str()).collect();
     assert_eq!(
@@ -141,7 +217,7 @@ fn control_slots_dedupe_repeats_and_skip_easy_switch() {
         assignments: vec![control_assignment(0x00d1, 8.65, 13.8)],
     });
 
-    let slots = key_slots(Some(&asset));
+    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
 
     assert_eq!(slots.len(), 1);
     assert_eq!(
@@ -169,7 +245,7 @@ fn control_slots_dedupe_across_image_groups_keeping_the_keys_image_position() {
         ],
     });
 
-    let slots = key_slots(Some(&asset));
+    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
 
     let screen_capture: Vec<_> = slots
         .iter()

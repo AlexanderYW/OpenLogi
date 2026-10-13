@@ -6,12 +6,14 @@
 //! while the keyboard physically makes room. Only one key is selected at a
 //! time.
 //!
-//! Which keys appear is the asset's call (see [`key_points::key_slots`]): a
-//! depot with control markers shows the keyboard's own HID++ controls, each
-//! bound per device through [`AppState::commit_binding`] and diverted by the
-//! agent while bound; a depot without them shows the OS-hook F-row, bound
-//! globally through [`AppState::commit_keyboard_binding`]. The panel lists
-//! the same action catalog the mouse picker uses, plus a Power User section.
+//! Which keys appear is the asset's call (see [`key_points::key_surface`]): a
+//! depot with control markers shows the keyboard's own HID++ controls on the
+//! photo, each bound per device through [`AppState::commit_binding`] and
+//! diverted by the agent while bound; a markerless keypad shows its own
+//! keycaps drawn from the device model, bound the same per-device way; any
+//! other markerless device shows the OS-hook F-row, bound globally through
+//! [`AppState::commit_keyboard_binding`]. The panel lists the same action
+//! catalog the mouse picker uses, plus a Power User section.
 
 #![expect(
     clippy::needless_pass_by_value,
@@ -35,7 +37,8 @@ use gpui::{
 };
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{Selectable as _, h_flex, input::InputState, v_flex};
-use openlogi_core::binding::{Action, WorkflowStep};
+use openlogi_core::binding::{Action, ButtonId, Cid, GridKey, WorkflowStep};
+use openlogi_core::device::DeviceKind;
 
 use super::editors::{
     PowerUserKind, text_editor_placeholder, text_editor_seed, workflow_editor_seed,
@@ -58,9 +61,9 @@ use gpui::{Animation, AnimationExt, img};
 mod key_points;
 
 pub(crate) use key_points::KeyTarget;
-use key_points::key_slots;
 #[cfg(test)]
 use key_points::{EVEN_SPACING_END, EVEN_SPACING_START, key_x_fractions};
+use key_points::{KEYCAP_H, KEYCAP_PAGING_H, KEYCAP_W, KeySurface, key_surface, keypad_canvas};
 
 /// Width of the config panel (CSS px) when a key is selected.
 const PANEL_W: f32 = 320.;
@@ -205,6 +208,11 @@ impl Render for FunctionRowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = AppState::try_read(cx);
         let asset = state.and_then(|state| state.current_record()?.asset.as_ref());
+        // Without a record there is no device surface to trust, and the F-row
+        // fallback is as honest as anything that shows.
+        let kind = state
+            .and_then(|state| state.current_record())
+            .map_or(DeviceKind::Keyboard, |record| record.kind);
         let glow = state.and_then(|state| {
             state
                 .current_record()
@@ -214,7 +222,18 @@ impl Render for FunctionRowView {
         let viewport_h = f32::from(window.viewport_size().height);
         let render_size = keyboard_render_size(asset, viewport_h);
         let image_path = asset.map(|asset| asset.image_path.clone());
-        let slots: Vec<KeySlot> = key_slots(asset)
+        // The photo holds the same height as the keycap canvas, so the pair
+        // sits on one alignment line. Sized here, with the rest of the
+        // asset-derived data, before the borrow of the app state ends.
+        let photo = asset
+            .filter(|asset| asset.png_height > 0)
+            .map_or((0., 0.), |asset| {
+                asset_dimensions_for_png(asset, keypad_canvas().1, 360.)
+            });
+        let surface = key_surface(asset, kind);
+        let keypad = matches!(surface, KeySurface::Keypad(_));
+        let slots: Vec<KeySlot> = surface
+            .slots()
             .into_iter()
             .enumerate()
             .map(|(idx, layout)| {
@@ -272,10 +291,20 @@ impl Render for FunctionRowView {
             }
         }
         let view = cx.entity();
-        let keyboard =
+        // The same selection, panel, and editor machinery on either surface:
+        // the keyboard's photo with callouts, or the keypad's photo beside
+        // drawn keycaps.
+        let device = if keypad {
+            KeypadPane::new(slots.clone(), image_path, photo, view.clone())
+                .selected(selected)
+                .hovered(hovered)
+                .into_any_element()
+        } else {
             KeyboardPane::new(slots.clone(), image_path, glow, render_size, view.clone())
                 .selected(selected)
-                .hovered(hovered);
+                .hovered(hovered)
+                .into_any_element()
+        };
         let panel = selected.map(|selected| self.config_panel(selected, &slots, &view, cx));
 
         // The whole row animates as one: when a key is selected the right-side
@@ -283,8 +312,49 @@ impl Render for FunctionRowView {
         v_flex()
             .w_full()
             .items_center()
-            .child(InspectorRow::new(keyboard).panel(panel))
+            .child(InspectorRow::new(device).panel(panel))
     }
+}
+
+fn binding_line(
+    binding: SharedString,
+    icon: Option<&'static str>,
+    max_w: f32,
+    highlighted: bool,
+    pal: &Palette,
+) -> gpui::Div {
+    h_flex()
+        .items_center()
+        .justify_center()
+        .gap(px(2.))
+        .max_w(px(max_w))
+        .when_some(icon, |row, icon| {
+            row.child(
+                svg()
+                    .path(icon)
+                    .size(px(9.))
+                    .flex_none()
+                    .text_color(if highlighted {
+                        rgb(ACCENT_BLUE).into()
+                    } else {
+                        pal.text_muted
+                    }),
+            )
+        })
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .text_caption()
+                .text_color(if highlighted {
+                    rgb(ACCENT_BLUE).into()
+                } else {
+                    pal.text_muted
+                })
+                .child(binding),
+        )
 }
 
 /// The keyboard render size: the actual PNG aspect at up to [`KEYBOARD_W`]
@@ -313,8 +383,8 @@ struct KeySlot {
 }
 
 /// The action `target` is bound to in the selected device's open profile
-/// (a control) or the global F-row map (a function key). `None` when the key
-/// is on its native function.
+/// (a control or keypad key) or the global F-row map (a function key).
+/// `None` when the key is on its native function.
 fn bound_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
     match target {
         KeyTarget::Control(button) => state
@@ -322,14 +392,19 @@ fn bound_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
             .get(button)
             .filter(|action| **action != Action::None)
             .cloned(),
+        KeyTarget::Grid(key) => state
+            .button_bindings()
+            .get(&ButtonId::Grid(*key))
+            .filter(|action| **action != Action::None)
+            .cloned(),
         KeyTarget::FunctionKey(trigger) => state.keyboard_bindings().get(trigger).cloned(),
     }
 }
 
-/// Persist `action` for `target`: a control binds per device (and per open
-/// app profile) like any mouse button; a function key binds globally.
-/// `None` returns a control to its native function; for a function key it
-/// clears the trigger.
+/// Persist `action` for `target`: controls and keypad keys bind per device
+/// (and per open app profile) like any mouse button; a function key binds
+/// globally. `None` returns a device key to its native function; for a
+/// function key it clears the trigger.
 pub(super) fn commit_key_action(
     state: &mut AppState,
     target: &KeyTarget,
@@ -337,21 +412,25 @@ pub(super) fn commit_key_action(
 ) -> StateEvents {
     match target {
         KeyTarget::Control(button) => state.commit_binding(*button, action.unwrap_or(Action::None)),
+        KeyTarget::Grid(key) => {
+            state.commit_binding(ButtonId::Grid(*key), action.unwrap_or(Action::None))
+        }
         KeyTarget::FunctionKey(trigger) => state.commit_keyboard_binding(trigger.clone(), action),
     }
 }
 
-/// The two-pane row: keyboard photo + an optional side panel.
+/// The two-pane row: keyboard photo (or keypad keycaps) + an optional side
+/// panel.
 #[derive(IntoElement)]
 struct InspectorRow {
-    keyboard: KeyboardPane,
+    keyboard: AnyElement,
     panel: Option<gpui::Div>,
 }
 
 impl InspectorRow {
-    fn new(keyboard: KeyboardPane) -> Self {
+    fn new(keyboard: impl Into<AnyElement>) -> Self {
         Self {
-            keyboard,
+            keyboard: keyboard.into(),
             panel: None,
         }
     }
@@ -494,6 +573,218 @@ impl RenderOnce for KeyboardPane {
     }
 }
 
+/// A markerless keypad: the device photo beside keycaps drawn from the
+/// device model — the nine LCD keys as the 3×3 array they physically are and
+/// the two paging keys as lower caps beneath the first two columns. The
+/// photo establishes identity; the keycaps are the click targets, so no
+/// marker coordinates are invented and nothing pretends the device has keys
+/// it lacks. Keycaps carry their binding like callout bubbles, open the same
+/// panel on click, and share the selection and hover treatments.
+#[derive(IntoElement)]
+struct KeypadPane {
+    slots: Vec<KeySlot>,
+    image: Option<std::path::PathBuf>,
+    photo: (f32, f32),
+    selected: Option<usize>,
+    hovered: Option<usize>,
+    view: Entity<FunctionRowView>,
+}
+
+impl KeypadPane {
+    fn new(
+        slots: Vec<KeySlot>,
+        image: Option<std::path::PathBuf>,
+        photo: (f32, f32),
+        view: Entity<FunctionRowView>,
+    ) -> Self {
+        Self {
+            slots,
+            image,
+            photo,
+            selected: None,
+            hovered: None,
+            view,
+        }
+    }
+
+    #[must_use]
+    fn selected(mut self, selected: impl Into<Option<usize>>) -> Self {
+        self.selected = selected.into();
+        self
+    }
+
+    #[must_use]
+    fn hovered(mut self, hovered: impl Into<Option<usize>>) -> Self {
+        self.hovered = hovered.into();
+        self
+    }
+}
+
+impl RenderOnce for KeypadPane {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let canvas = keypad_canvas();
+        let (selected, hovered) = (self.selected, self.hovered);
+        let view = self.view;
+        let pal = theme::palette(cx);
+        let (photo_w, photo_h) = self.photo;
+        let keycaps =
+            div()
+                .relative()
+                .w(px(canvas.0))
+                .h(px(canvas.1))
+                .children(self.slots.into_iter().map(move |slot| {
+                    let highlighted = key_is_highlighted(slot.idx, selected, hovered);
+                    KeyCap {
+                        slot,
+                        highlighted,
+                        canvas,
+                        view: view.clone(),
+                    }
+                }));
+        // The render keeps the device's identity; the keycaps, sized to the
+        // same height, form the aligned pair that replaces photo-plus-band.
+        h_flex()
+            .items_center()
+            .gap_6()
+            .when_some(self.image, |row, path| {
+                row.child(image_or_fallback(Some(path), photo_w, photo_h, &pal))
+            })
+            .child(keycaps)
+    }
+}
+
+/// One keycap: face, binding line, click behavior. The keycap itself is the
+/// click target — no bubble, no leader line — and it wears the same
+/// selected/hover treatment as the photo path's callout bubbles.
+#[derive(IntoElement)]
+struct KeyCap {
+    slot: KeySlot,
+    highlighted: bool,
+    canvas: (f32, f32),
+    view: Entity<FunctionRowView>,
+}
+
+impl RenderOnce for KeyCap {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let (w, h) = self.canvas;
+        let pal = theme::palette(cx);
+        let idx = self.slot.idx;
+        let (cap_h, glyph) = keycap_face(&self.slot.target);
+        let highlighted = self.highlighted;
+        let tooltip = self.slot.label.clone();
+        let legend = self.slot.label;
+        let binding = self.slot.binding;
+        let binding_icon = self.slot.binding_icon;
+        let left = self.slot.x_frac * w - KEYCAP_W / 2.;
+        let top = self.slot.y_frac * h - cap_h / 2.;
+        let view_hover = self.view.clone();
+        let view_click = self.view;
+
+        div()
+            .id(("keycap", idx))
+            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            .absolute()
+            .top(px(top))
+            .left(px(left))
+            .w(px(KEYCAP_W))
+            .h(px(cap_h))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(1.))
+            .rounded_md()
+            .border_1()
+            .border_color(if highlighted {
+                rgb(ACCENT_BLUE).into()
+            } else {
+                pal.border
+            })
+            .bg(if highlighted {
+                theme::accent_tint()
+            } else {
+                pal.control
+            })
+            .cursor_pointer()
+            .hover(move |s| {
+                s.bg(if highlighted {
+                    theme::accent_tint_hover()
+                } else {
+                    pal.control_hover
+                })
+            })
+            .child(
+                div()
+                    .max_w(px(KEYCAP_W - 8.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_base()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(if highlighted {
+                        rgb(ACCENT_BLUE).into()
+                    } else {
+                        pal.text_primary
+                    })
+                    .child(match glyph {
+                        Some(glyph) => glyph.to_string(),
+                        None => legend.to_string(),
+                    }),
+            )
+            .child(binding_line(
+                binding,
+                binding_icon,
+                KEYCAP_W - 8.,
+                highlighted,
+                &pal,
+            ))
+            .on_hover(move |hovered, _window, cx| {
+                let next = (*hovered).then_some(idx);
+                view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
+            })
+            .on_click(move |_ev, _window, cx| {
+                view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+            })
+    }
+}
+
+/// The keycap's face: height and glyph. Grid keys draw the position they
+/// physically occupy; paging keys, lower caps, draw their device legends.
+/// Controls outside those tables fall back to their localized name, never a
+/// made-up glyph.
+fn keycap_face(target: &KeyTarget) -> (f32, Option<&'static str>) {
+    match target {
+        KeyTarget::Grid(key) => (KEYCAP_H, Some(grid_glyph(*key))),
+        KeyTarget::Control(button) => (KEYCAP_PAGING_H, button.cid().and_then(paging_glyph)),
+        KeyTarget::FunctionKey(_) => (KEYCAP_H, None),
+    }
+}
+
+/// Position glyphs mirroring the physical keypad. Locales differ, geometries
+/// don't — and the full key name stays one tooltip away.
+fn grid_glyph(key: GridKey) -> &'static str {
+    match key {
+        GridKey::TopLeft => "↖",
+        GridKey::TopMiddle => "↑",
+        GridKey::TopRight => "↗",
+        GridKey::MiddleLeft => "←",
+        GridKey::Middle => "●",
+        GridKey::MiddleRight => "→",
+        GridKey::BottomLeft => "↙",
+        GridKey::BottomMiddle => "↓",
+        GridKey::BottomRight => "↘",
+    }
+}
+
+/// The two paging keys' printed legends.
+fn paging_glyph(cid: Cid) -> Option<&'static str> {
+    match cid {
+        cid if cid == Cid::new(0x01a1) => Some("‹"),
+        cid if cid == Cid::new(0x01a2) => Some("›"),
+        _ => None,
+    }
+}
+
 /// One callout bubble in the band above the keyboard.
 #[derive(IntoElement)]
 struct KeyCallout {
@@ -567,36 +858,13 @@ impl RenderOnce for KeyCallout {
                     })
                     .child(self.slot.label.clone()),
             )
-            .child(
-                h_flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(2.))
-                    .max_w(px(KEY_CALLOUT_W - 8.))
-                    .when_some(binding_icon, |row, icon| {
-                        row.child(svg().path(icon).size(px(9.)).flex_none().text_color(
-                            if highlighted {
-                                rgb(ACCENT_BLUE).into()
-                            } else {
-                                pal.text_muted
-                            },
-                        ))
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .text_caption()
-                            .text_color(if highlighted {
-                                rgb(ACCENT_BLUE).into()
-                            } else {
-                                pal.text_muted
-                            })
-                            .child(binding),
-                    ),
-            )
+            .child(binding_line(
+                binding,
+                binding_icon,
+                KEY_CALLOUT_W - 8.,
+                highlighted,
+                &pal,
+            ))
             .on_hover(move |hovered, _window, cx| {
                 let next = (*hovered).then_some(idx);
                 view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
@@ -806,12 +1074,16 @@ impl FunctionRowView {
         let state = AppState::try_read(cx);
         let current = state.and_then(|state| bound_action(state, &target));
         // A control binds inside the open app profile, like a mouse button.
+        // A control or keypad key binds inside the open app profile, like a
+        // mouse button.
         let app = match target {
-            KeyTarget::Control(_) => state.and_then(AppState::editing_app).map(|app| {
-                state
-                    .and_then(|state| state.recent_app_name(app))
-                    .map_or_else(|| friendly_app_name(app), str::to_string)
-            }),
+            KeyTarget::Control(_) | KeyTarget::Grid(_) => {
+                state.and_then(AppState::editing_app).map(|app| {
+                    state
+                        .and_then(|state| state.recent_app_name(app))
+                        .map_or_else(|| friendly_app_name(app), str::to_string)
+                })
+            }
             KeyTarget::FunctionKey(_) => None,
         };
 
