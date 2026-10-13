@@ -177,47 +177,58 @@ fn emit_button_edges(
     }
 }
 
-/// Decode one keypad grid-key vendor PDU into `(wire index, pressed)`.
+/// Decode one keypad grid-key vendor PDU into `(pressed, reported ids)`.
 ///
 /// The MX Creative Keypad's framing, hardware-verified 2026-10: a 32-byte
-/// report `13 ff 02 00 [seq] 01 [key] …`, where the rolling `seq` nibble's
-/// odd values mark a press and even values the matching release, and `key` is
-/// the 1-based grid index. Anything else on the node — HID++ replies, other
-/// vendor traffic — decodes to `None`; the index table itself is owned by
+/// report `13 ff 02 00 [seq] 01 [id, …]`, where the rolling `seq` nibble's
+/// odd values mark a press and even values the matching release, and the
+/// payload lists the ids the frame reports — NUL-terminated, so a chord
+/// arrives as one frame naming every key that changed. Both payload selectors
+/// are pinned (`00` sub-report, `01` id-list marker), as our capture shows and
+/// as the node-logitech reference decoder validates. Anything else on the
+/// node — HID++ replies, drawing acks, other vendor traffic — decodes to
+/// `None`; the index table itself is owned by
 /// [`openlogi_core::binding::GridKey`], so this decodes a frame, not identity.
-fn grid_key_event(bytes: &[u8]) -> Option<(u8, bool)> {
-    if bytes.len() >= 7 && bytes[0] == 0x13 && bytes[1] == 0xff && bytes[2] == 0x02 {
-        let (seq, key) = (bytes[4], bytes[6]);
-        if (1..=9).contains(&key) {
-            return Some((key, seq % 2 == 1));
-        }
+fn grid_key_frame(bytes: &[u8]) -> Option<(bool, &[u8])> {
+    if bytes.len() >= 7
+        && bytes[0] == 0x13
+        && bytes[1] == 0xff
+        && bytes[2] == 0x02
+        && bytes[3] == 0x00
+        && bytes[5] == 0x01
+    {
+        return Some((bytes[4] % 2 == 1, &bytes[6..]));
     }
     None
 }
 
-/// Diff one grid-key vendor frame into at most one edge: presses and releases
-/// carry parity in the sequence nibble, so the held set only needs to dedupe
-/// repeated frames. Unbound indices are skipped before any state is touched.
+/// Diff one grid-key vendor frame's id list into balanced edges: presses and
+/// releases carry parity in the sequence nibble, so the held set only needs to
+/// dedupe repeated frames, and a chord decodes to one edge per named key.
+/// Unbound indices are skipped before any state is touched.
 fn emit_grid_edges(
     down: &mut BTreeSet<u8>,
     bytes: &[u8],
     grid: &BTreeMap<u8, ButtonId>,
     sink: &mpsc::UnboundedSender<CapturedInput>,
 ) {
-    let Some((index, pressed)) = grid_key_event(bytes) else {
+    let Some((pressed, ids)) = grid_key_frame(bytes) else {
         return;
     };
-    // Unbound grid keys stay entirely out of the state: the device's own
-    // firmware function is the only thing they do.
-    let Some(&button) = grid.get(&index) else {
-        return;
-    };
-    if pressed {
-        if down.insert(index) {
-            let _ = sink.send(CapturedInput::ButtonDown(button));
+    for index in ids.iter().copied().take_while(|id| *id != 0) {
+        // Unbound grid keys stay entirely out of the state: the device's own
+        // firmware function is the only thing they do — even on a frame that
+        // also names a bound key.
+        let Some(&button) = grid.get(&index) else {
+            continue;
+        };
+        if pressed {
+            if down.insert(index) {
+                let _ = sink.send(CapturedInput::ButtonDown(button));
+            }
+        } else if down.remove(&index) {
+            let _ = sink.send(CapturedInput::ButtonUp(button));
         }
-    } else if down.remove(&index) {
-        let _ = sink.send(CapturedInput::ButtonUp(button));
     }
 }
 
@@ -416,26 +427,57 @@ mod tests {
         );
     }
 
-    /// A probe-shaped grid PDU: `13 ff 02 00 [seq] 01 [key]` padded to the
+    /// A probe-shaped grid PDU: `13 ff 02 00 [seq] 01 [id, …]` padded to the
     /// 32 bytes the keypad node actually carries.
-    fn grid_pdu(seq: u8, key: u8) -> Vec<u8> {
-        let mut pdu = vec![0x13, 0xff, 0x02, 0x00, seq, 0x01, key];
+    fn grid_pdu(seq: u8, ids: &[u8]) -> Vec<u8> {
+        let mut pdu = vec![0x13, 0xff, 0x02, 0x00, seq, 0x01];
+        pdu.extend_from_slice(ids);
         pdu.resize(32, 0);
         pdu
     }
 
+    /// The same decode plus the id list read to its NUL terminator, so the
+    /// zero padding does not leak into the expected values.
+    fn frame_ids(bytes: &[u8]) -> Option<(bool, Vec<u8>)> {
+        grid_key_frame(bytes).map(|(pressed, ids)| {
+            (
+                pressed,
+                ids.iter().copied().take_while(|id| *id != 0).collect(),
+            )
+        })
+    }
+
     #[test]
     fn grid_frames_decode_press_and_release_by_parity() {
-        assert_eq!(grid_key_event(&grid_pdu(0x03, 5)), Some((5, true)));
-        assert_eq!(grid_key_event(&grid_pdu(0x04, 5)), Some((5, false)));
-        // An HID++ long report sharing the node, an off-grid key, and a
-        // truncated frame all decode to nothing.
+        assert_eq!(frame_ids(&grid_pdu(0x03, &[5])), Some((true, vec![5])));
+        assert_eq!(frame_ids(&grid_pdu(0x04, &[5])), Some((false, vec![5])));
+        // An HID++ long report sharing the node, a frame whose key byte is
+        // off-grid (the session ignores it via the bound map, so it may pass
+        // the frame decode), and a truncated frame.
+        assert_eq!(frame_ids(&[0x11, 0xff, 0x04, 0x1a, 0x0b, 0xb8, 0, 0]), None);
+        assert_eq!(frame_ids(&grid_pdu(0x01, &[10])), Some((true, vec![10])));
+        assert_eq!(frame_ids(&[0x13, 0xff, 0x02, 0x00, 0x01]), None);
+    }
+
+    #[test]
+    fn grid_frames_reject_wrong_payload_selectors() {
+        // The `13 ff 02` prefix alone must not decode: a drawing-style ack
+        // (`13 ff 02 7b …`) names what would be a valid key byte, and the
+        // previous decoder emitted a phantom release edge for exactly that.
+        let mut ack = vec![0x13, 0xff, 0x02, 0x7b, 0xe0, 0x01, 0x05];
+        ack.resize(32, 0);
+        assert_eq!(frame_ids(&ack), None);
+        // And a frame with the id-list marker replaced also decodes to nothing.
+        assert_eq!(frame_ids(&[0x13, 0xff, 0x02, 0x00, 0x01, 0x02, 0x05]), None);
+    }
+
+    #[test]
+    fn grid_frames_carry_every_chorded_key_in_one_list() {
+        // A two-key chord is one frame naming both keys, not two frames.
         assert_eq!(
-            grid_key_event(&[0x11, 0xff, 0x04, 0x1a, 0x0b, 0xb8, 0, 0]),
-            None
+            frame_ids(&grid_pdu(0x07, &[3, 8])),
+            Some((true, vec![3, 8]))
         );
-        assert_eq!(grid_key_event(&grid_pdu(0x01, 10)), None);
-        assert_eq!(grid_key_event(&[0x13, 0xff, 0x02, 0x00, 0x01]), None);
     }
 
     #[test]
@@ -445,12 +487,13 @@ mod tests {
         let mut down = BTreeSet::new();
 
         // A repeated press frame must not double the edge, and frames for
-        // unbound keys must not touch the state they are not part of.
-        emit_grid_edges(&mut down, &grid_pdu(0x01, 2), &grid, &sink);
-        emit_grid_edges(&mut down, &grid_pdu(0x01, 2), &grid, &sink);
-        emit_grid_edges(&mut down, &grid_pdu(0x02, 7), &grid, &sink);
-        emit_grid_edges(&mut down, &grid_pdu(0x04, 2), &grid, &sink);
-        emit_grid_edges(&mut down, &grid_pdu(0x05, 7), &grid, &sink);
+        // unbound keys — including a chord with a bound key — must not touch
+        // the state they are not part of.
+        emit_grid_edges(&mut down, &grid_pdu(0x01, &[2]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x01, &[2]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x02, &[7]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x03, &[2, 7]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x04, &[2, 7]), &grid, &sink);
 
         assert_eq!(
             std::iter::from_fn(|| inputs.try_recv().ok()).collect::<Vec<_>>(),
@@ -459,5 +502,33 @@ mod tests {
                 CapturedInput::ButtonUp(ButtonId::Grid(GridKey::TopMiddle)),
             ]
         );
+        // The unbound key left no residue in the held set either.
+        assert_eq!(down, BTreeSet::default());
+    }
+
+    #[test]
+    fn grid_chords_emit_one_balanced_edge_pair_per_key() {
+        let grid = BTreeMap::from([
+            (3, ButtonId::Grid(GridKey::TopRight)),
+            (8, ButtonId::Grid(GridKey::BottomMiddle)),
+        ]);
+        let (sink, mut inputs) = mpsc::unbounded_channel();
+        let mut down = BTreeSet::new();
+
+        // Press both as a chord, then release each separately.
+        emit_grid_edges(&mut down, &grid_pdu(0x01, &[3, 8]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x02, &[3]), &grid, &sink);
+        emit_grid_edges(&mut down, &grid_pdu(0x04, &[8]), &grid, &sink);
+
+        assert_eq!(
+            std::iter::from_fn(|| inputs.try_recv().ok()).collect::<Vec<_>>(),
+            vec![
+                CapturedInput::ButtonDown(ButtonId::Grid(GridKey::TopRight)),
+                CapturedInput::ButtonDown(ButtonId::Grid(GridKey::BottomMiddle)),
+                CapturedInput::ButtonUp(ButtonId::Grid(GridKey::TopRight)),
+                CapturedInput::ButtonUp(ButtonId::Grid(GridKey::BottomMiddle)),
+            ]
+        );
+        assert_eq!(down, BTreeSet::default());
     }
 }
