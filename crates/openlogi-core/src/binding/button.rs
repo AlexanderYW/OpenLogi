@@ -338,6 +338,16 @@ impl GridKey {
         Self::BottomRight,
     ];
 
+    /// Physical position as `(row, col)`, zero-based from the top-left. The
+    /// inverse of [`index`](Self::index): the firmware numbers keys row-major,
+    /// so a GUI drawing the device's keycap grid must not re-derive the
+    /// mapping from another number.
+    #[must_use]
+    pub const fn position(self) -> (usize, usize) {
+        let idx = self.index() as usize - 1;
+        (idx / 3, idx % 3)
+    }
+
     /// The 1-based index the device's vendor report carries for this key.
     #[must_use]
     pub const fn index(self) -> u8 {

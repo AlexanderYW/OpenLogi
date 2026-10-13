@@ -822,6 +822,24 @@ fn grid_key_index_mapping_is_row_major_and_total() {
     assert_eq!(GridKey::from_index(10), None);
 }
 
+/// The GUI's keycap grid draws from `position`, so it must agree with the
+/// wire numbering: row-major, three by three, every cell used once.
+#[test]
+fn grid_key_positions_are_the_row_major_grid_the_device_reports() {
+    let mut cells = std::collections::HashSet::new();
+    for key in GridKey::ALL {
+        let (row, col) = key.position();
+        assert_eq!(
+            row * 3 + col,
+            usize::from(key.index()) - 1,
+            "{key:?} position"
+        );
+        cells.insert((row, col));
+    }
+    assert_eq!(cells.len(), 9, "the nine keys fill distinct cells");
+    assert!(cells.iter().all(|&(row, col)| row < 3 && col < 3));
+}
+
 #[test]
 fn the_original_key_names_still_load_as_controls() {
     // Files written by 0.7–0.8.9 name keyboard keys with these variants; the
