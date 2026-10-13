@@ -38,6 +38,16 @@
 //! - Mapping run: pressing the nine keys in physical row-major order printed
 //!   the index sequence `1..=9`. The pinning lives in
 //!   `openlogi_core::binding::GridKey`; this file only verifies it.
+//! - Cross-checked 2026-10 against the reference decoder
+//!   (`node-logitech-mx-creative-console`,
+//!   `packages/core/src/services/input/mx-creative-keypad.ts`): the payload
+//!   is the same — `ff 02 00 [counter] 01 [id, …]`, ids NUL-terminated, so a
+//!   chord arrives as one frame naming every key that changed, and the
+//!   session decoder must read the whole list. The difference is edge
+//!   detection: the reference diffs the held-id sets of successive frames
+//!   and never reads the counter, but our capture shows release frames
+//!   re-encoding the key id (which that model would hold down), so here
+//!   sequence parity is the press/release signal.
 
 use std::collections::BTreeMap;
 use std::error::Error;
