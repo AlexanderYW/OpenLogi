@@ -115,20 +115,87 @@ fn keypad_keycaps_follow_the_device_layout() {
     assert_approx_eq(slots[10].point.x_frac, slots[7].point.x_frac);
 }
 
-/// A depot that ever ships control markers still wins the photo path over
-/// the schematic — kind alone doesn't force keycaps.
+/// A keypad depot that marks only its paging keys has not answered what the
+/// tab asks: the photo path would show two bubbles and hide the nine grid
+/// keys it exists to bind. The device-model keycap map — every key, always —
+/// stays until the grid is marked too.
 #[test]
-fn control_markers_still_own_the_photo_path_on_a_numpad() {
+fn paging_markers_alone_leave_the_keypad_on_the_keycap_map() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
-    let asset = asset_with_controls(&[(0x01a1, 20.0, 80.0)]);
-    let slots = key_slots(Some(&asset), DeviceKind::Numpad);
+    let asset = asset_with_controls(&[(0x01a1, 25.20, 82.04), (0x01a2, 49.91, 82.04)]);
 
-    assert!(
-        matches!(slots[0].target, KeyTarget::Control(_)),
-        "marked keys keep their marker points"
+    let marked = key_slots(Some(&asset), DeviceKind::Numpad);
+
+    assert_eq!(marked, key_slots(None, DeviceKind::Numpad));
+}
+
+/// The OpenLogi-authored c354 depot marks every key on the front render:
+/// the nine grid keys by `_g<index>` (wire order, row-major) and the two
+/// paging controls by their CIDs. Those caps go onto the render — positions
+/// as authored, since keypad markers need no Logitech canvas correction —
+/// in physical reading order.
+#[test]
+fn grid_markers_put_the_keypad_caps_on_the_photo() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+
+    let slots = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+
+    assert_eq!(
+        slots.len(),
+        11,
+        "the whole device is marked, so no key falls back to the schematic"
     );
-    assert_eq!(slots.len(), 1);
+    assert!(
+        !slots
+            .iter()
+            .any(|slot| matches!(slot.target, KeyTarget::FunctionKey(_))),
+        "a keypad binds its own keys, never the global F-row"
+    );
+    assert_eq!(slots[0].target, KeyTarget::Grid(GridKey::TopLeft));
+    assert_eq!(slots[0].legend, "Grid Key (Top Left)");
+    assert_approx_eq(slots[0].point.x_frac, 24.92 / 100.);
+    assert_approx_eq(slots[0].point.y_frac, 20.77 / 100.);
+    assert_eq!(slots[4].target, KeyTarget::Grid(GridKey::Middle));
+    assert_eq!(slots[8].target, KeyTarget::Grid(GridKey::BottomRight));
+    assert_eq!(
+        slots[9].target,
+        KeyTarget::Control(ButtonId::control(0x01a1)),
+        "the paging keys join as the controls they are, under the grid"
+    );
+    assert_eq!(slots[9].legend, "Left Paging Button");
+    assert_eq!(
+        slots[10].target,
+        KeyTarget::Control(ButtonId::control(0x01a2))
+    );
+    assert!(
+        slots[9].point.y_frac > slots[6].point.y_frac,
+        "the paging row sits below the grid rows, in left-to-right order"
+    );
+}
+
+/// The overlay caps must keep the render's gaps: at the authored positions
+/// and the render they were measured on, no two caps may overlap.
+#[test]
+fn overlay_caps_stay_inside_the_keys_they_mark() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+    let render = (935., 1105.);
+    let slots = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+
+    for (a, b) in slots.iter().zip(&slots[1..]) {
+        let (w1, h1) = overlay_cap(&a.target, render);
+        let (w2, h2) = overlay_cap(&b.target, render);
+        let dx = (b.point.x_frac - a.point.x_frac).abs() * render.0;
+        let dy = (b.point.y_frac - a.point.y_frac).abs() * render.1;
+        assert!(
+            2. * dx >= w1 + w2 || 2. * dy >= h1 + h2,
+            "caps for {} and {} overlap",
+            a.legend,
+            b.legend
+        );
+    }
 }
 
 /// A Logi depot with control markers shows the keyboard's own controls —
@@ -453,6 +520,53 @@ fn asset_with_controls(controls: &[(u16, f32, f32)]) -> ResolvedAsset {
         },
         png_width: 1872,
         png_height: 728,
+    }
+}
+
+/// The c354 depot as authored: `device_keys_image` marks the nine grid keys
+/// row-major (`_g1`…`_g9`, at centres measured off the render) and the two
+/// paging controls by CID.
+fn keypad_marker_asset() -> ResolvedAsset {
+    let mut assignments: Vec<Assignment> = [
+        (1, 24.92, 20.77),
+        (2, 50.33, 20.77),
+        (3, 75.73, 20.77),
+        (4, 24.92, 42.27),
+        (5, 50.33, 42.27),
+        (6, 75.73, 42.27),
+        (7, 24.92, 63.84),
+        (8, 50.33, 63.84),
+        (9, 75.73, 63.84),
+    ]
+    .into_iter()
+    .map(|(index, x, y)| Assignment {
+        slot_id: format!("mx-creative-keypad-c354_g{index}"),
+        slot_name: String::new(),
+        marker: Point { x, y },
+        label: Direction { x: 0, y: 0 },
+    })
+    .collect();
+    assignments.push(control_assignment(0x01a1, 25.20, 82.05));
+    assignments.push(control_assignment(0x01a2, 49.91, 82.04));
+    ResolvedAsset {
+        depot: "mx_creative_keypad".to_string(),
+        display_name: "MX Creative Keypad".to_string(),
+        kind: Some(DeviceKind::Numpad),
+        image_path: PathBuf::from("/tmp/mx-creative-keypad.png"),
+        hero_image_path: None,
+        glow: None,
+        metadata: Metadata {
+            images: vec![ImageEntry {
+                key: "device_keys_image".to_string(),
+                origin: Origin {
+                    width: 935,
+                    height: 1105,
+                },
+                assignments,
+            }],
+        },
+        png_width: 935,
+        png_height: 1105,
     }
 }
 
