@@ -48,6 +48,7 @@ use super::{
 mod asset_targets;
 mod backlight;
 mod bindings;
+mod brightness;
 mod camera;
 pub(crate) mod device_list;
 mod device_names;

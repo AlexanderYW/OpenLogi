@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use gpui::{Context, Subscription};
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    PointerSpeed, ReportRateInfo, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
+    FnLockState, PointerSpeed, ReportRateInfo, SmartShiftStatus, WriteError,
 };
 use swr_core::{
     MaybeSend, MaybeSync, QueryHandle, QueryOptions, QueryState, Retry, RetryPolicy, Runtime,
@@ -18,12 +18,12 @@ use swr_gpui::Query;
 use tokio::sync::mpsc;
 
 use super::ipc::{
-    Command, ReadBacklight, ReadDpi, ReadEasySwitchHosts, ReadFnLock, ReadPointerSpeed,
-    ReadReportRate, ReadSmartShift,
+    Command, ReadBacklight, ReadBrightness, ReadDpi, ReadEasySwitchHosts, ReadFnLock,
+    ReadPointerSpeed, ReadReportRate, ReadSmartShift,
 };
 use crate::state::{
-    AppState, BacklightLoad, DeviceKey, DpiLoad, EasySwitchLoad, FnLockLoad, HostRenameRefusal,
-    Load, PointerSpeedLoad, ReportRateLoad, SmartShiftLoad, StateEvent,
+    AppState, BacklightLoad, BrightnessLoad, DeviceKey, DpiLoad, EasySwitchLoad, FnLockLoad,
+    HostRenameRefusal, Load, PointerSpeedLoad, ReportRateLoad, SmartShiftLoad, StateEvent,
 };
 
 const ROOT: &str = "device-read";
@@ -34,6 +34,7 @@ const REPORT_RATE: &str = "report-rate";
 const POINTER_SPEED: &str = "pointer-speed";
 const BACKLIGHT: &str = "backlight";
 const EASY_SWITCH: &str = "easy-switch";
+const BRIGHTNESS: &str = "brightness";
 
 /// Preserve the old budget: one initial attempt and two retries.
 const READ_RETRY_POLICY: RetryPolicy = RetryPolicy {
@@ -80,6 +81,7 @@ pub(crate) struct DeviceReads {
     /// out on; cleared with that read.
     host_renames: BTreeMap<DeviceKey, HostRenames>,
     next_host_rename: u64,
+    brightness: BTreeMap<DeviceKey, DeviceRead<BrightnessState>>,
 }
 
 /// The Easy-Switch host renames sent to one device that have not been
@@ -1035,6 +1037,101 @@ impl DeviceReads {
         self.fn_lock.get(key).map(|read| &read.load)
     }
 
+    /// Start the brightness query unless the same route is already subscribed.
+    /// A write does not need this: [`Self::set_brightness_ready`] lands the
+    /// echo, and a refused write calls [`Self::refresh_brightness`].
+    pub(crate) fn ensure_brightness(
+        &mut self,
+        key: DeviceKey,
+        route: DeviceRoute,
+        commands: mpsc::UnboundedSender<Command>,
+        cx: &mut Context<AppState>,
+    ) {
+        if self
+            .brightness
+            .get(&key)
+            .is_some_and(|read| read.route == route)
+        {
+            return;
+        }
+        self.remove_brightness(&key);
+        let Some((client, runtime)) = self.cache() else {
+            return;
+        };
+        let flight = self.take_flight();
+        let fetch_route = route.clone();
+        let fetcher = Retry::new(
+            runtime,
+            move |_| {
+                let commands = commands.clone();
+                let route = fetch_route.clone();
+                read_ipc(
+                    move |reply| ReadBrightness { route, reply }.into(),
+                    commands,
+                )
+            },
+            READ_RETRY_POLICY,
+        )
+        .retry_if(|error| !brightness_error_is_permanent(error));
+        let handle = client.subscribe(
+            query_key(BRIGHTNESS, &key),
+            fetcher,
+            QueryOptions::immutable(),
+        );
+        let query = Query::new(&client, handle, cx);
+        let load = project_load(query.read(cx), brightness_error_is_permanent);
+        let observed_key = key.clone();
+        let observer = cx.observe(query.state(), move |state, query_state, cx| {
+            let load = project_load(query_state.read(cx), brightness_error_is_permanent);
+            if state
+                .device_reads_mut()
+                .update_brightness(&observed_key, flight, load)
+            {
+                cx.emit(StateEvent::BrightnessChanged(observed_key.clone()));
+            }
+        });
+        self.brightness.insert(
+            key,
+            DeviceRead {
+                route,
+                flight,
+                load,
+                query,
+                _observer: observer,
+            },
+        );
+    }
+
+    /// Show `state` as `key`'s brightness now — the value the GUI just asked
+    /// the device to take or the value it echoed. A local write fences a fetch
+    /// still in flight, mirroring [`Self::set_fn_lock_ready`].
+    pub(crate) fn set_brightness_ready(&mut self, key: &DeviceKey, state: BrightnessState) {
+        let value = Arc::new(state);
+        if let Some(client) = &self.client {
+            client.set::<_, Cached<BrightnessState>, WriteError>(
+                query_key(BRIGHTNESS, key),
+                Some(value.clone()),
+            );
+        }
+        if let Some(read) = self.brightness.get_mut(key) {
+            read.load = Load::Ready(value);
+        }
+    }
+
+    /// Re-read `key`'s brightness from the device, keeping the last value on
+    /// screen while it answers. The fallback after a write the device refused.
+    pub(crate) fn refresh_brightness(&mut self, key: &DeviceKey) {
+        if let Some(read) = self.brightness.get_mut(key) {
+            read.query.revalidate();
+        }
+    }
+
+    /// `key`'s brightness load, or `None` while nothing has subscribed to it.
+    #[must_use]
+    pub(crate) fn brightness_load(&self, key: &DeviceKey) -> Option<&BrightnessLoad> {
+        self.brightness.get(key).map(|read| &read.load)
+    }
+
     /// `key`'s DPI load, or `None` while nothing has subscribed to it.
     #[must_use]
     pub(crate) fn dpi_load(&self, key: &DeviceKey) -> Option<&DpiLoad> {
@@ -1122,6 +1219,7 @@ impl DeviceReads {
         self.remove_pointer_speed(key);
         self.remove_backlight(key);
         self.remove_easy_switch(key);
+        self.remove_brightness(key);
     }
 
     pub(crate) fn remove_dpi(&mut self, key: &DeviceKey) {
@@ -1175,6 +1273,13 @@ impl DeviceReads {
         }
     }
 
+    fn remove_brightness(&mut self, key: &DeviceKey) {
+        if let Some(read) = self.brightness.remove(key) {
+            drop(read);
+            self.clear::<BrightnessState>(BRIGHTNESS, key);
+        }
+    }
+
     /// Forget every query whose device is no longer present.
     pub(crate) fn retain_present(&mut self, present: impl Fn(&str) -> bool) {
         let removed: BTreeSet<_> = self
@@ -1186,6 +1291,7 @@ impl DeviceReads {
             .chain(self.pointer_speed.keys())
             .chain(self.backlight.keys())
             .chain(self.easy_switch.keys())
+            .chain(self.brightness.keys())
             .filter(|key| !present(key.as_str()))
             .cloned()
             .collect();
@@ -1324,6 +1430,21 @@ impl DeviceReads {
         true
     }
 
+    fn update_brightness(&mut self, key: &DeviceKey, flight: u64, load: BrightnessLoad) -> bool {
+        let Some(read) = self
+            .brightness
+            .get_mut(key)
+            .filter(|read| read.flight == flight)
+        else {
+            return false;
+        };
+        if read.load == load {
+            return false;
+        }
+        read.load = load;
+        true
+    }
+
     fn update_smartshift(&mut self, key: &DeviceKey, flight: u64, load: SmartShiftLoad) -> bool {
         let Some(read) = self
             .smartshift
@@ -1415,6 +1536,10 @@ fn smartshift_error_is_permanent(error: &WriteError) -> bool {
 }
 
 fn fn_lock_error_is_permanent(error: &WriteError) -> bool {
+    matches!(error, WriteError::FeatureUnsupported { .. })
+}
+
+fn brightness_error_is_permanent(error: &WriteError) -> bool {
     matches!(error, WriteError::FeatureUnsupported { .. })
 }
 

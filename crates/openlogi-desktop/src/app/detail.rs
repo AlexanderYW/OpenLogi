@@ -24,6 +24,7 @@ use crate::app::menu::open_config_folder;
 use crate::features::action_ring::ActionRingPanel;
 use crate::features::camera::controls::CameraControlsPanel;
 use crate::features::camera::preview::CameraPreview;
+use crate::features::display::BrightnessPanel;
 use crate::features::keyboard::function_row::FunctionRowView;
 use crate::features::lighting::keyboard_rgb::LightingPanel;
 use crate::features::lighting::standalone::LightPanel;
@@ -96,6 +97,7 @@ pub(super) struct DetailPanels<'a> {
     pub keyboard_model: &'a gpui::Entity<FunctionRowView>,
     pub dpi_panel: &'a gpui::Entity<DpiPanel>,
     pub smartshift_panel: &'a gpui::Entity<SmartShiftPanel>,
+    pub brightness_panel: &'a gpui::Entity<BrightnessPanel>,
     pub lighting_panel: &'a gpui::Entity<LightingPanel>,
     pub camera_preview: &'a gpui::Entity<CameraPreview>,
     pub camera_controls: &'a gpui::Entity<CameraControlsPanel>,
@@ -133,7 +135,7 @@ pub(super) fn detail_content(
             camera_tab(panels.camera_preview, panels.camera_controls).into_any_element()
         }
         DetailTab::Light => light_tab(panels.light_panel, cx).into_any_element(),
-        DetailTab::Device => device_tab(cx).into_any_element(),
+        DetailTab::Device => device_tab(panels.brightness_panel, cx).into_any_element(),
     };
     let navigation = detail_navigation(tabs, active, cx);
     v_flex()
@@ -674,12 +676,17 @@ fn light_tab(
     )
 }
 
-/// Device tab: device details and configuration cards stacked.
-fn device_tab(cx: &mut Context<AppView>) -> impl IntoElement {
+/// Device tab: device details and configuration cards stacked, plus the
+/// brightness card for a device that measured BrightnessControl (`0x8040`).
+fn device_tab(
+    brightness_panel: &gpui::Entity<BrightnessPanel>,
+    cx: &mut Context<AppView>,
+) -> impl IntoElement {
     let pal = theme::palette(cx);
     let keyboard = AppState::try_read(cx)
         .and_then(AppState::current_record)
         .is_some_and(|record| record.kind == DeviceKind::Keyboard);
+    let brightness = AppState::try_read(cx).is_some_and(AppState::current_brightness_supported);
     tab_body(
         ContentWidth::Small,
         v_flex()
@@ -695,6 +702,7 @@ fn device_tab(cx: &mut Context<AppView>) -> impl IntoElement {
                 easy_switch::EasySwitchFacts::current(cx),
                 pal,
             ))
+            .when(brightness, |column| column.child(brightness_panel.clone()))
             .child(configuration_card(pal, cx)),
     )
 }
