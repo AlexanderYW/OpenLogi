@@ -58,16 +58,23 @@ use pending::{
 };
 use raw::supports_short_long_hidpp;
 
-/// Largest report on any node the channel opens, in both directions.
-/// Logitech's very-long HID++ lighting report (`0x12`) is 64 bytes, and the
-/// MX Creative Keypad's grid-key vendor PDUs (`0x13`) are 32.
-const MAX_RAW_REPORT_LENGTH: usize = 64;
+/// Largest *input* report on any node the channel opens. Logitech's
+/// very-long HID++ lighting report (`0x12`) is 64 bytes, and the MX Creative
+/// Keypad's grid-key and acknowledgement vendor PDUs (`0x13`) are 32.
+const MAX_INPUT_REPORT_LENGTH: usize = 64;
 
 /// This is the size of the buffer incoming reports are read into. It must
 /// cover the widest report any node carries, not only the 20-byte HID++ long
 /// message: the read thread cannot re-request a truncated report, so a
 /// narrower buffer would hand listeners a frame that never existed.
-const MAX_REPORT_LENGTH: usize = MAX_RAW_REPORT_LENGTH;
+const MAX_REPORT_LENGTH: usize = MAX_INPUT_REPORT_LENGTH;
+
+/// Largest report [`HidppChannel::write_raw_report`] accepts, report ID
+/// included: the MX Creative Keypad's image-write vendor report (`0x14`) is
+/// 4095 bytes, the widest output report a HID descriptor on these nodes
+/// declares. Outputs are bounded separately from inputs because no device
+/// sends a report that wide, so the read buffer stays small.
+const MAX_RAW_WRITE_LENGTH: usize = 4095;
 
 /// The default time budget for a [`HidppChannel::send`] request: the report
 /// write plus the wait for a matching response. Callers that need a different
@@ -689,11 +696,11 @@ impl HidppChannel {
 
     /// Write one raw HID report through this channel's already-owned transport.
     ///
-    /// Reports must contain `1..=64` bytes, including their report ID. The
+    /// Reports must contain `1..=4095` bytes, including their report ID. The
     /// operation is bounded by [`SEND_RESPONSE_TIMEOUT`] and returns the exact
-    /// byte count reported by the transport. This is intended for HID++ report
-    /// widths such as the 64-byte `0x12` lighting frame that [`HidppMessage`]
-    /// cannot represent.
+    /// byte count reported by the transport. This is intended for report
+    /// widths that [`HidppMessage`] cannot represent: the 64-byte `0x12`
+    /// lighting frame, and the keypad's 4095-byte `0x14` image write.
     pub async fn write_raw_report(&self, report: &[u8]) -> Result<usize, ChannelError> {
         self.write_raw_report_with_timeout(report, SEND_RESPONSE_TIMEOUT)
             .await
@@ -704,7 +711,7 @@ impl HidppChannel {
         report: &[u8],
         timeout: Duration,
     ) -> Result<usize, ChannelError> {
-        if !(1..=MAX_RAW_REPORT_LENGTH).contains(&report.len()) {
+        if !(1..=MAX_RAW_WRITE_LENGTH).contains(&report.len()) {
             return Err(ChannelError::InvalidRawReportLength(report.len()));
         }
 
