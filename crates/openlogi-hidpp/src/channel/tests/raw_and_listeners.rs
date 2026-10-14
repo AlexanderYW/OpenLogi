@@ -8,12 +8,44 @@ fn raw_report_write_forwards_exact_bytes_and_length() {
     futures::executor::block_on(async {
         let (raw, handle) = MockRawHidChannel::new();
         let channel = channel_with_reader(raw).await;
-        let report = [0x12; MAX_RAW_REPORT_LENGTH];
+        let report = [0x12; MAX_INPUT_REPORT_LENGTH];
 
         let written = channel.write_raw_report(&report).await.unwrap();
 
         assert_eq!(written, report.len());
         assert_eq!(handle.written_reports(), [report.to_vec()]);
+    });
+}
+
+/// The keypad's image write is the widest output any node takes: a full
+/// 4095-byte report reaches the transport intact, and an observer sees all of
+/// it rather than a prefix bounded by the input buffer.
+#[test]
+fn raw_report_write_carries_and_observes_the_widest_output_report() {
+    futures::executor::block_on(async {
+        let (raw, handle) = MockRawHidChannel::new();
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let observer_observations = Arc::clone(&observations);
+        let observer: Arc<dyn ChannelObserver> = Arc::new(move |observation| {
+            observer_observations.lock().unwrap().push(observation);
+        });
+        let channel = HidppChannel::from_raw_channel_with_observer(raw, observer)
+            .await
+            .expect("the mock transport speaks HID++");
+        let mut report = vec![0xa5; MAX_RAW_WRITE_LENGTH];
+        report[0] = 0x14;
+
+        let written = channel.write_raw_report(&report).await.unwrap();
+
+        assert_eq!(written, MAX_RAW_WRITE_LENGTH);
+        assert_eq!(handle.written_reports(), [report.clone()]);
+        assert!(observations.lock().unwrap().iter().any(|observation| {
+            matches!(
+                observation,
+                ChannelObservation::OutgoingReport { report: outgoing, .. }
+                    if outgoing.as_bytes() == report.as_slice()
+            )
+        }));
     });
 }
 
@@ -25,14 +57,14 @@ fn raw_report_write_rejects_empty_and_oversized_inputs_without_io() {
 
         let empty = channel.write_raw_report(&[]).await.unwrap_err();
         let oversized = channel
-            .write_raw_report(&[0; MAX_RAW_REPORT_LENGTH + 1])
+            .write_raw_report(&[0; MAX_RAW_WRITE_LENGTH + 1])
             .await
             .unwrap_err();
 
         assert!(matches!(empty, ChannelError::InvalidRawReportLength(0)));
         assert!(matches!(
             oversized,
-            ChannelError::InvalidRawReportLength(65)
+            ChannelError::InvalidRawReportLength(4096)
         ));
         assert!(handle.written_reports().is_empty());
     });
