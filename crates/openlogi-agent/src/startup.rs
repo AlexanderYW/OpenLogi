@@ -168,18 +168,20 @@ pub(crate) struct HidppWatcherHandles {
     gesture: WatcherHandle,
     host_switch: WatcherHandle,
     keyboard: WatcherHandle,
+    key_display: WatcherHandle,
 }
 
 impl HidppWatcherHandles {
     /// Stop all managers concurrently and confirm firmware teardown. The
     /// lifecycle retains this future and owns the terminal-exit deadline.
     pub(crate) async fn stop_and_wait(self) -> bool {
-        let (gesture, host_switch, keyboard) = tokio::join!(
+        let (gesture, host_switch, keyboard, key_display) = tokio::join!(
             self.gesture.stop_and_wait("gesture"),
             self.host_switch.stop_and_wait("host-switch"),
             self.keyboard.stop_and_wait("keyboard"),
+            self.key_display.stop_and_wait("key-display"),
         );
-        [gesture, host_switch, keyboard]
+        [gesture, host_switch, keyboard, key_display]
             .into_iter()
             .all(StopOutcome::is_stopped)
     }
@@ -211,10 +213,15 @@ pub(crate) fn spawn_hidpp_watchers(
         shared.keyboard_access(),
         inputs.dispatcher.clone(),
     );
+    // Keypad LCD tiles go through the keyboard session's channel, like
+    // Fn-lock: the keypad is the keyboard plane's device.
+    let key_display =
+        watchers::key_display::spawn(&shared.key_display_specs, shared.keyboard_access());
     HidppWatcherHandles {
         gesture,
         host_switch,
         keyboard,
+        key_display,
     }
 }
 

@@ -5529,12 +5529,16 @@ version = "0.8.14"
 dependencies = [
  "axwatch",
  "futures-lite",
+ "image",
  "openlogi-core",
  "openlogi-fixture",
  "openlogi-hid",
  "openlogi-hook",
  "openlogi-inject",
  "openlogi-ipc",
+ "openlogi-ui",
+ "resvg 0.46.0",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
