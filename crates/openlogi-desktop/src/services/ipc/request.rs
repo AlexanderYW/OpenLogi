@@ -18,8 +18,9 @@ use std::future::Future;
 
 use openlogi_core::config::{ConfigRevision, Lighting};
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    LightCommand, ReceiverSelector, ReportRate, ReportRateInfo, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
+    FnLockState, LightCommand, ReceiverSelector, ReportRate, ReportRateInfo, SmartShiftStatus,
+    WriteError,
 };
 use openlogi_ipc::{
     AgentClient, ChosenLight, ConfigReloadError, PairingCommandError, PairingFailure, SavedConfig,
@@ -473,6 +474,26 @@ impl Request for ReadFnLock {
     }
 }
 
+/// Read a device's brightness now; the answer goes back over `reply`.
+pub struct ReadBrightness {
+    pub route: DeviceRoute,
+    pub reply: oneshot::Sender<Result<BrightnessState, WriteError>>,
+}
+
+impl Request for ReadBrightness {
+    type Answer = Result<BrightnessState, WriteError>;
+
+    async fn call(&self, client: &AgentClient) -> Result<Self::Answer, RpcError> {
+        client
+            .read_brightness(context::current(), self.route.clone())
+            .await
+    }
+
+    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, _: &UpdateSender) {
+        let _ = self.reply.send(or_unavailable(outcome));
+    }
+}
+
 /// Have the agent re-read the `config.toml` the GUI just saved
 /// ([`openlogi_ipc::Agent::reload_saved_config`]).
 ///
@@ -733,6 +754,8 @@ commands! {
     ReadReportRate,
     ReadBacklight,
     ReadEasySwitchHosts,
+    SetBrightness,
+    ReadBrightness,
     LoadConfig,
     ReloadConfig,
     RequestAccessibilityPrompt,
@@ -742,6 +765,32 @@ commands! {
     UnpairDevice,
     #[cfg(all(target_os = "macos", debug_assertions))]
     PollEventMonitor,
+}
+
+/// Set a device's brightness now, answered as [`GuiUpdate::BrightnessWritten`]
+/// with the state the device echoes back — the applied level, not the
+/// requested one, because firmware may clamp.
+pub struct SetBrightness {
+    pub route: DeviceRoute,
+    pub level: u16,
+    pub key: DeviceKey,
+}
+
+impl Request for SetBrightness {
+    type Answer = Result<BrightnessState, WriteError>;
+
+    async fn call(&self, client: &AgentClient) -> Result<Self::Answer, RpcError> {
+        client
+            .set_brightness(context::current(), self.route.clone(), self.level)
+            .await
+    }
+
+    fn deliver(self, outcome: Result<Self::Answer, Unavailable>, updates: &UpdateSender) {
+        let _ = updates.send(GuiUpdate::BrightnessWritten {
+            key: self.key,
+            result: or_unavailable(outcome),
+        });
+    }
 }
 
 #[cfg(test)]

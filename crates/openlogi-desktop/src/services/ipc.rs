@@ -41,8 +41,8 @@
 use std::time::{Duration, Instant};
 
 use openlogi_core::hid::{
-    BacklightState, DeviceRoute, EasySwitchHosts, FnLockState, LightCommand, ReportRateInfo,
-    WriteError,
+    BacklightState, BrightnessState, DeviceRoute, EasySwitchHosts, FnLockState, LightCommand,
+    ReportRateInfo, WriteError,
 };
 use openlogi_ipc::SavedConfig;
 use openlogi_ipc::client::{self, ConnectError};
@@ -66,10 +66,11 @@ use request::LinkLost;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub use request::PollEventMonitor;
 pub use request::{
-    CancelPairing, Command, LoadConfig, PairDevice, ReadBacklight, ReadDpi, ReadEasySwitchHosts,
-    ReadFnLock, ReadReportRate, ReadSmartShift, ReloadConfig, RenameEasySwitchHost,
-    RequestAccessibilityPrompt, SetBacklight, SetDpi, SetFnLock, SetLight, SetLightManualPower,
-    SetLighting, SetReportRate, SetSmartShift, StartPairing, UnpairDevice,
+    CancelPairing, Command, LoadConfig, PairDevice, ReadBacklight, ReadBrightness, ReadDpi,
+    ReadEasySwitchHosts, ReadFnLock, ReadReportRate, ReadSmartShift, ReloadConfig,
+    RenameEasySwitchHost, RequestAccessibilityPrompt, SetBacklight, SetBrightness, SetDpi,
+    SetFnLock, SetLight, SetLightManualPower, SetLighting, SetReportRate, SetSmartShift,
+    StartPairing, UnpairDevice,
 };
 
 /// How long to wait before retrying a connect that failed. This is a retry
@@ -150,6 +151,15 @@ pub enum GuiUpdate {
         write: u64,
         /// The read-back, or why the rename did not land.
         result: Result<EasySwitchHosts, WriteError>,
+    },
+    /// What a device reports after a brightness write the GUI asked for: the
+    /// state it echoes — the applied level, which firmware may have clamped —
+    /// or the typed refusal. Answers [`SetBrightness`].
+    BrightnessWritten {
+        /// The device that was written.
+        key: DeviceKey,
+        /// The echoed state, or why the write did not land.
+        result: Result<BrightnessState, WriteError>,
     },
     /// A pairing command could not be delivered, so no session will ever appear
     /// in the observed state to explain the silence. Reported locally rather
