@@ -131,10 +131,10 @@ pub use succession::Identity;
 ///      that precision mode lights. `ReceiverSelector::ReceiverUid`
 ///      appended — a pairing target matched by receiver product ID and
 ///      unique ID, never falling back to another receiver.
-/// v39: `Capabilities::{brightness, creative_keypad}`,
+/// v39: `Capabilities::brightness`,
 ///      `Agent::{read_brightness, set_brightness}` and
 ///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
-///      `0x8040` device brightness and the MX Creative Console family marker.
+///      `0x8040` device brightness.
 pub const PROTOCOL_VERSION: u32 = 39;
 
 /// Environment variable through which the agent hands a supervised helper the
