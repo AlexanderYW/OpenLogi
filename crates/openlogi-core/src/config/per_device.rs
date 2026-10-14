@@ -343,6 +343,23 @@ impl Config {
             .or_default()
             .pointer_speed = Some(speed);
     }
+
+    /// The persisted BrightnessControl level for `device_key`, or `None` when
+    /// the user never set one (the device keeps its own level).
+    #[must_use]
+    pub fn brightness(&self, device_key: &str) -> Option<u16> {
+        self.devices.get(device_key).and_then(|d| d.brightness)
+    }
+
+    /// Record the BrightnessControl level for `device_key`; the agent
+    /// re-applies it when a device that forgets its level reconnects.
+    pub fn set_brightness(&mut self, device_key: &str, level: u16) {
+        self.devices
+            .entry(device_key.to_string())
+            .or_default()
+            .brightness = Some(level);
+    }
+
     /// Record the SmartShift wheel config for `device_key`, so the agent can
     /// re-apply it when the device reconnects (#189).
     pub fn set_smartshift(&mut self, device_key: &str, smartshift: SmartShift) {

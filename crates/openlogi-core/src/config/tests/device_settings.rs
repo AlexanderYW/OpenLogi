@@ -1,4 +1,4 @@
-//! Per-device settings: DPI and its presets, SmartShift, scroll inversion and resolution, the smooth wheel, keeping the OS layout, the report rate, and the stored bindings.
+//! Per-device settings: DPI and its presets, SmartShift, brightness, scroll inversion and resolution, the smooth wheel, keeping the OS layout, the report rate, and the stored bindings.
 
 use super::*;
 
@@ -25,6 +25,27 @@ fn smartshift_roundtrips_per_device() {
     let restored = write_and_read(&cfg);
     assert_eq!(restored.smartshift("2b042"), Some(smartshift));
     assert_eq!(restored.smartshift("absent"), None);
+}
+
+#[test]
+fn brightness_roundtrips_per_device() {
+    let mut cfg = Config::default();
+    assert_eq!(cfg.brightness("c354"), None);
+    cfg.set_brightness("c354", 40);
+    let restored = write_and_read(&cfg);
+    assert_eq!(restored.brightness("c354"), Some(40));
+    assert_eq!(restored.brightness("absent"), None);
+}
+
+#[test]
+fn unset_brightness_is_omitted_from_toml() {
+    let mut cfg = Config::default();
+    cfg.set_binding("c354", ButtonId::Back, Binding::Single(Action::Copy));
+    let body = toml::to_string_pretty(&cfg).expect("serialize");
+    assert!(
+        !body.contains("brightness"),
+        "an unset brightness must not be written: {body}"
+    );
 }
 
 #[test]

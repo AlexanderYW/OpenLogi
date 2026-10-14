@@ -319,6 +319,14 @@ pub struct DeviceConfig {
     /// One page is the default and is omitted from `config.toml`.
     #[serde(default, skip_serializing_if = "is_first_page")]
     pub keypad_pages: KeypadPage,
+    /// The HID++ `0x8040` BrightnessControl level the user last chose. A
+    /// device whose BrightnessControl reports itself transient (the MX
+    /// Creative Keypad) forgets its level on a power cycle, so the agent
+    /// re-applies this when such a device reconnects or the host wakes; a
+    /// device that keeps its own level is left alone. `None` means "never
+    /// set".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<u16>,
 }
 
 impl DeviceConfig {
@@ -424,6 +432,7 @@ impl Default for DeviceConfig {
             report_rate: None,
             pointer_speed: None,
             keypad_pages: KeypadPage::FIRST,
+            brightness: None,
         }
     }
 }
@@ -564,6 +573,8 @@ struct RawDeviceConfig {
     pointer_speed: Option<PointerSpeed>,
     #[serde(default)]
     keypad_pages: KeypadPage,
+    #[serde(default)]
+    brightness: Option<u16>,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -629,6 +640,7 @@ impl From<RawDeviceConfig> for DeviceConfig {
             report_rate: raw.report_rate,
             pointer_speed: raw.pointer_speed,
             keypad_pages: raw.keypad_pages,
+            brightness: raw.brightness,
         }
     }
 }

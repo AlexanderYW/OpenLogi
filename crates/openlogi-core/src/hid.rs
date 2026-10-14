@@ -25,8 +25,7 @@ pub mod smartshift;
 pub use backlight::{
     BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus,
 };
-
-pub use brightness::BrightnessState;
+pub use brightness::{BrightnessState, WritableBrightness};
 pub use dpi::{Dpi, DpiCapabilities, DpiInfo};
 pub use easy_switch::{EasySwitchHosts, EasySwitchSlot, HostConnection, HostOsInfo, HostOsKind};
 pub use error::{HidppFeatureErrorKind, HidppOperation, WriteError};
