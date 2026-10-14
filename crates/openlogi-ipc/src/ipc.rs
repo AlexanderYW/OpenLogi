@@ -111,8 +111,8 @@ pub use succession::Identity;
 ///      change made on a light unless the save holds its value, removes the
 ///      control's value, or the user chose that control. A file at another
 ///      revision loads as a plain reload.
-///      `Capabilities::{brightness,
-///      creative_keypad}`, `Agent::{read_brightness, set_brightness}` and
+///      `Capabilities::brightness`,
+///      `Agent::{read_brightness, set_brightness}` and
 ///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
 ///      `0x8040` device brightness.
 pub const PROTOCOL_VERSION: u32 = 37;
