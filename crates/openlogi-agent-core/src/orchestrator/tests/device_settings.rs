@@ -483,3 +483,90 @@ fn keyboard_spec_never_diverts_reserved_controls() {
         BTreeMap::from([(0x010a, ButtonId::control(0x010a))])
     );
 }
+
+fn wired_keypad(key: &str, online: bool) -> AgentDevice {
+    AgentDevice {
+        route: Some(DeviceRoute::Direct {
+            vendor_id: 0x046d,
+            product_id: 0xc354,
+        }),
+        slot: DIRECT_DEVICE_INDEX,
+        kind: DeviceKind::Numpad,
+        ..dev(key, DIRECT_DEVICE_INDEX, online)
+    }
+}
+
+/// Each grid key shows its bound action's glyph, and a key that does nothing
+/// — unbound, or bound to `None` — shows nothing: the same "bound" rule the
+/// capture set uses, so a lit key always does something.
+#[test]
+fn keypad_key_faces_follow_the_bound_actions() {
+    use crate::watchers::key_display::KeyFace;
+    use openlogi_core::binding::ActionRingIcon;
+
+    let mut config = Config::default();
+    config.set_binding(
+        "keypad",
+        ButtonId::Grid(GridKey::Middle),
+        Binding::Single(Action::Copy),
+    );
+    config.set_binding(
+        "keypad",
+        ButtonId::Grid(GridKey::BottomRight),
+        Binding::Single(Action::None),
+    );
+    let mut orch = orchestrator(config);
+    orch.devices = vec![wired_keypad("keypad", true)];
+
+    let specs = orch.key_display_specs_for();
+    let [spec] = specs.as_slice() else {
+        panic!("one keypad publishes one spec: {specs:?}");
+    };
+    assert_eq!(spec.faces.len(), 9);
+    assert_eq!(
+        spec.faces[&GridKey::Middle],
+        KeyFace::Icon(ActionRingIcon::for_action(&Action::Copy))
+    );
+    assert_eq!(spec.faces[&GridKey::BottomRight], KeyFace::Blank);
+    assert_eq!(spec.faces[&GridKey::TopLeft], KeyFace::Blank);
+    assert_eq!(spec.display.key_size, 118);
+}
+
+/// Only a device whose panel the registry describes gets a spec — a bound
+/// numpad-kind device on another route does not — and a keypad that is
+/// offline or disabled publishes nothing to paint.
+#[test]
+fn key_display_specs_need_a_present_enabled_display_keypad() {
+    let mut config = Config::default();
+    config.set_binding(
+        "other",
+        ButtonId::Grid(GridKey::Middle),
+        Binding::Single(Action::Copy),
+    );
+    let mut orch = orchestrator(config);
+    let mut other = dev("other", 1, true);
+    other.kind = DeviceKind::Numpad;
+    orch.devices = vec![other, wired_keypad("asleep", false)];
+    assert!(orch.key_display_specs_for().is_empty());
+
+    let mut config = Config::default();
+    config.set_device_enabled("keypad", false);
+    let mut orch = orchestrator(config);
+    orch.devices = vec![wired_keypad("keypad", true)];
+    assert!(orch.key_display_specs_for().is_empty());
+}
+
+/// A reconnect or wake bumps the re-arm generation, and the published spec
+/// carries it so the watcher repaints a panel that may have reset.
+#[test]
+fn key_display_specs_carry_the_rearm_generation() {
+    let mut orch = orchestrator(Config::default());
+    orch.devices = vec![wired_keypad("keypad", true)];
+    let before = orch.key_display_specs_for()[0].generation;
+
+    orch.shared
+        .capture_rearm_generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    assert_eq!(orch.key_display_specs_for()[0].generation, before + 1);
+}

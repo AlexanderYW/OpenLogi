@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{Action, Binding, ButtonId};
+use openlogi_core::binding::{Action, ActionRingIcon, Binding, ButtonId, GridKey};
 use openlogi_core::bindings::{button_bindings_for, oshook_gestures_for};
 use openlogi_core::config::{Config, LightSettings, MouseProfileTarget, canonical_device_key};
 use openlogi_core::device::{
@@ -27,6 +27,7 @@ use openlogi_hid::{
     BacklightChange, BacklightState, CaptureChannelSlot, ChannelPool, ChannelRegistry,
     DeviceIoGate, DeviceRoute, EasySwitchHosts, FnLockState, HidppOperation, HostOs, ReportRate,
     ReportRateInfo, WriteError, commands_for_light_settings, is_reserved_keyboard_control,
+    key_display_for,
 };
 use openlogi_ipc::InventoryHealth;
 use tokio::sync::watch;
@@ -45,6 +46,7 @@ use crate::runtime::hook::{HookMaps, SharedHookMaps};
 use crate::runtime::scroll::ScrollPreferences;
 use crate::watchers::host_switch::{HostSwitchLink, HostSwitchLinks};
 use crate::watchers::inventory::InventoryRefresh;
+use crate::watchers::key_display::{KeyDisplaySpec, KeyFace, SharedKeyDisplaySpecs};
 use crate::watchers::keyboard::{KeyboardSpec, SharedKeyboardSpec};
 use crate::watchers::light::{WatchedLight, WatchedLights};
 use crate::{DpiCycleState, DpiCycles};
@@ -125,6 +127,9 @@ pub struct SharedHandles {
     /// The keyboard capture session's open channel, reused by Fn-lock writes
     /// (the mouse-oriented [`Self::capture_channel`] points elsewhere).
     pub keyboard_channel: CaptureChannelSlot,
+    /// What every online keypad's LCD keys should show; empty while no
+    /// keypad with display keys is present.
+    pub key_display_specs: SharedKeyDisplaySpecs,
     /// Incremented when a device reconnects or the system wakes, so capture
     /// sessions re-arm volatile HID++ control diversion even when route and
     /// online flags look unchanged.
@@ -376,6 +381,7 @@ pub struct Orchestrator {
     /// `shared`, keeping the orchestrator's single-writer contract structural.
     capture_plans_tx: watch::Sender<Arc<CapturePublication>>,
     keyboard_spec_tx: watch::Sender<Option<Arc<KeyboardSpec>>>,
+    key_display_specs_tx: watch::Sender<Arc<Vec<KeyDisplaySpec>>>,
     host_switch_links_tx: watch::Sender<Arc<Vec<HostSwitchLink>>>,
     watched_lights_tx: watch::Sender<Arc<Vec<WatchedLight>>>,
     shared: SharedHandles,
@@ -423,6 +429,7 @@ impl Orchestrator {
         let (capture_plans_tx, capture_plans) =
             watch::channel(Arc::new(CapturePublication::default()));
         let (keyboard_spec_tx, keyboard_spec) = watch::channel(None);
+        let (key_display_specs_tx, key_display_specs) = watch::channel(Arc::new(Vec::new()));
         let (host_switch_links_tx, host_switch_links) = watch::channel(Arc::new(Vec::new()));
         let (watched_lights_tx, watched_lights) = watch::channel(Arc::new(Vec::new()));
         let shared = SharedHandles {
@@ -441,6 +448,7 @@ impl Orchestrator {
             channel_registry: ChannelRegistry::default(),
             keyboard_spec,
             keyboard_channel: Arc::new(RwLock::new(None)),
+            key_display_specs,
             capture_rearm_generation: Arc::new(AtomicU64::new(0)),
             receiver_access: ReceiverAccess::default(),
             transport_turns: crate::hardware::TransportTurns::default(),
@@ -473,6 +481,7 @@ impl Orchestrator {
             os_mouse_hook_available: false,
             capture_plans_tx,
             keyboard_spec_tx,
+            key_display_specs_tx,
             host_switch_links_tx,
             watched_lights_tx,
             shared,
@@ -699,6 +708,41 @@ impl Orchestrator {
         publish_optional_arc_if_changed(&self.keyboard_spec_tx, self.keyboard_spec_for());
         publish_arc_if_changed(&self.watched_lights_tx, self.watched_lights());
         self.publish_lights();
+        publish_arc_if_changed(&self.key_display_specs_tx, self.key_display_specs_for());
+    }
+
+    /// What each online, enabled keypad's LCD keys should show: the glyph of
+    /// the action each grid key is bound to, or nothing for an unbound key —
+    /// the same effective bindings (per-app overlay included) the keyboard
+    /// capture session dispatches, under the same "bound" rule.
+    ///
+    /// Only a device whose panel the registry describes qualifies; no kind
+    /// gate stands in for that identity fact.
+    fn key_display_specs_for(&self) -> Vec<KeyDisplaySpec> {
+        let generation = self.shared.capture_rearm_generation.load(Ordering::Relaxed);
+        self.devices
+            .iter()
+            .filter(|dev| dev.online && self.config.device_enabled(&dev.config_key))
+            .filter_map(|dev| {
+                let route = dev.route.clone()?;
+                let display = key_display_for(&route)?;
+                let bindings = button_bindings_for(
+                    &self.config,
+                    Some(&dev.config_key),
+                    self.current_app.as_deref(),
+                );
+                let faces = GridKey::ALL
+                    .into_iter()
+                    .map(|key| (key, key_face(bindings.get(&ButtonId::Grid(key)))))
+                    .collect();
+                Some(KeyDisplaySpec {
+                    route,
+                    display,
+                    generation,
+                    faces,
+                })
+            })
+            .collect()
     }
 
     fn publish_capture_plans(&self) {
@@ -1430,6 +1474,28 @@ struct KeyboardDivertSet {
     grid: BTreeMap<u8, ButtonId>,
 }
 
+/// Whether a keyboard control or keypad grid key carries a real action. A
+/// [`Binding::LongPress`] is bound whatever its arms hold; a single binding is
+/// bound unless it is [`Action::None`], the "leave native" value. The capture
+/// set and a keypad key's face both decide "does this key do anything" here.
+fn is_bound_key(binding: &Binding) -> bool {
+    matches!(binding, Binding::LongPress(_)) || binding.click_action() != Action::None
+}
+
+/// What a keypad grid key shows for `binding`: blank exactly when the key does
+/// nothing, else the glyph of its press action — a long press's short action,
+/// or its long one when only that is set.
+fn key_face(binding: Option<&Binding>) -> KeyFace {
+    let Some(binding) = binding.filter(|binding| is_bound_key(binding)) else {
+        return KeyFace::Blank;
+    };
+    let action = match binding {
+        Binding::LongPress(press) if *press.short() == Action::None => press.long().clone(),
+        _ => binding.click_action(),
+    };
+    KeyFace::Icon(ActionRingIcon::for_action(&action))
+}
+
 /// Which of `bindings` the keyboard capture session takes over.
 ///
 /// A control is diverted whenever it is stored at all, even as
@@ -1437,18 +1503,15 @@ struct KeyboardDivertSet {
 /// `button_bindings_for` seeds no default for a [`ButtonId::Control`], so
 /// presence here is always an explicit user choice (#1747). A keypad grid key
 /// is only observed — the session never diverts it, so it cannot suppress the
-/// key — and joins the set only when it carries a real action: a
-/// [`Binding::LongPress`] whatever its arms hold, or a single binding other
-/// than [`Action::None`].
+/// key — and joins the set only when it carries a real action
+/// ([`is_bound_key`]).
 fn keyboard_divert_set(bindings: &BTreeMap<ButtonId, Binding>) -> KeyboardDivertSet {
     let mut set = KeyboardDivertSet::default();
     for (button, binding) in bindings {
         // A grid key's identity is its position, and the session observes it
         // without writing anything.
         if let Some(key) = button.grid_key() {
-            let bound =
-                matches!(binding, Binding::LongPress(_)) || binding.click_action() != Action::None;
-            if bound {
+            if is_bound_key(binding) {
                 set.grid.insert(key.index(), *button);
             }
             continue;
