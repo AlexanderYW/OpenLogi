@@ -1,11 +1,14 @@
 //! Device brightness: the `0x8040` BrightnessControl's read-back and write echo.
 //!
-//! The value lives in the device, not `config.toml` — the device keeps it,
-//! like SmartShift. A read answers with the level plus the range the device
-//! itself advertised; a write is answered by the state the device echoes, so
-//! the slider shows what the device accepted rather than what was requested —
-//! firmware is allowed to clamp. Until the first read lands there is nothing
-//! to show but a loading state: inventing a range would invent a device.
+//! Two facts, one authority each, like Fn-lock. The *setting* is
+//! `config.toml`'s per-device `brightness`, which the agent re-applies when a
+//! device that forgets its level (the MX Creative Keypad reports itself
+//! transient) reconnects. The *reading* is the device's own: a read answers
+//! with the level plus the range the device itself advertised, and a write is
+//! answered by the state the device echoes, so the slider shows what the
+//! device accepted rather than what was requested — firmware is allowed to
+//! clamp. Until the first read lands there is nothing to show but a loading
+//! state: inventing a range would invent a device.
 
 use openlogi_core::hid::{BrightnessState, WriteError};
 use tracing::warn;
@@ -33,11 +36,11 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// Write `level` to the active device now through the agent. The slider
-    /// rests on the requested value while only its range is the device's own;
-    /// the device's echo arrives as [`Self::apply_brightness_written`] and
-    /// shows the level that actually landed. No-op when no device is selected
-    /// or it reports no brightness.
+    /// Persist `level` for the active device and write it now through the
+    /// agent. The slider rests on the requested value while only its range is
+    /// the device's own; the device's echo arrives as
+    /// [`Self::apply_brightness_written`] and shows the level that actually
+    /// landed. No-op when no device is selected or it reports no brightness.
     pub fn commit_brightness(&mut self, level: u16) -> StateEvents {
         let events = self.for_current_device(StateEvent::BrightnessChanged);
         if !self.current_brightness_supported() {
@@ -47,7 +50,16 @@ impl AppState {
             return events;
         };
         let device_key = record.device_key();
-        let Some(route) = record.route.clone() else {
+        let persistent_key = record.persistent_config_key().map(str::to_string);
+        let route = record.route.clone();
+        if let Some(persistent_key) = persistent_key {
+            self.config
+                .edit(|config| config.set_brightness(&persistent_key, level));
+            if !self.persist_and_reload("brightness") {
+                return events;
+            }
+        }
+        let Some(route) = route else {
             return events;
         };
         // Keep the range the device reported and move only the level; the

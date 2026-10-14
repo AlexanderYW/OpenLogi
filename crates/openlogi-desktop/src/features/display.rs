@@ -1,14 +1,17 @@
 //! Device display controls: the `0x8040` BrightnessControl slider.
 //!
-//! Brightness is device state, not `config.toml` — read when the device is
-//! selected and written back with the value the device echoes. The MX Creative
-//! Keypad reports it for its LCD keys; any device reporting the feature gets
-//! the same panel, gated on the measured `brightness` capability.
+//! Brightness is read from the device when it is selected and shown as the
+//! value the device echoes; a committed level is also persisted, so the agent
+//! can restore it on a device that forgets it. The MX Creative Keypad reports
+//! it for its LCD keys; any device reporting the feature gets the same panel,
+//! gated on the measured `brightness` capability.
 
 use gpui::{
     AnyElement, Context, IntoElement, ParentElement as _, Render, Styled as _, Subscription, Window,
 };
 use gpui_component::{Icon, IconName, h_flex, slider::Slider, v_flex};
+
+use openlogi_core::hid::WritableBrightness;
 
 use crate::state::{AppState, BrightnessLoad, DeviceKey, DeviceRecord, StateEvent};
 use crate::ui::commit_slider::{CommitSlider, SliderRange};
@@ -16,12 +19,13 @@ use crate::ui::components::PanelCard;
 use crate::ui::status::{retry_line, status_line};
 use crate::ui::theme::{self, Palette, Typography as _};
 
-/// The slider together with what it was built for. The range is the device's
-/// own, so the slider is built from the first read that reports one and
-/// rebuilt only when the device or its range changes.
+/// The slider together with what it was built for. The range is the levels
+/// OpenLogi may write to the device — its advertised range without `0` — so
+/// the slider is built from the first read that reports one and rebuilt only
+/// when the device or its range changes.
 struct BrightnessSlider {
     device_key: DeviceKey,
-    range: (u16, u16),
+    range: WritableBrightness,
     slider: CommitSlider<u16>,
 }
 
@@ -65,14 +69,14 @@ impl BrightnessPanel {
             }
             return;
         };
-        let range = (reading.min, reading.max);
+        let range = reading.writable();
         match &self.slider {
             Some(slider) if slider.device_key == device_key && slider.range == range => {
                 slider.slider.sync(reading.level, window, cx);
             }
             _ => {
                 let slider = CommitSlider::new(
-                    SliderRange::new(reading.min, reading.max),
+                    SliderRange::new(range.min(), range.max()),
                     reading.level,
                     cx,
                     |_, level, cx| {

@@ -1,5 +1,5 @@
-//! Brightness: the device-owned value writes through the agent, is answered
-//! by the device's echo, and persists nothing.
+//! Brightness: a committed level is persisted for the agent to restore and
+//! written through the agent, and the device's echo answers it.
 
 use super::*;
 use crate::services::ipc::{Command, SetBrightness};
@@ -55,19 +55,26 @@ fn drain(receiver: &mut tokio::sync::mpsc::UnboundedReceiver<Command>) -> Vec<Co
 }
 
 #[test]
-fn brightness_write_sends_the_write_and_events_the_device() {
+fn brightness_write_persists_the_level_and_writes_the_device() {
     let (mut state, mut receiver) = keypad_state(true);
     drain(&mut receiver);
     assert!(state.current_brightness_supported());
     let record = state.current_record().expect("the keypad is selected");
     let key = record.device_key();
     let route = record.route.clone().expect("a direct route");
+    let config_key = record
+        .persistent_config_key()
+        .expect("a unit id makes the keypad persistent")
+        .to_string();
 
     let events = state.commit_brightness(75);
 
     assert_eq!(events, [StateEvent::BrightnessChanged(key.clone())]);
+    // Persisted so the agent can restore it after the keypad power-cycles.
+    assert_eq!(state.config.brightness(&config_key), Some(75));
     let commands = drain(&mut receiver);
     let [
+        Command::ReloadConfig(_),
         Command::SetBrightness(SetBrightness {
             route: written_route,
             level,
@@ -75,7 +82,7 @@ fn brightness_write_sends_the_write_and_events_the_device() {
         }),
     ] = commands.as_slice()
     else {
-        panic!("expected exactly one brightness write");
+        panic!("expected a config reload followed by one brightness write");
     };
     assert_eq!(*written_route, route);
     assert_eq!(*level, 75);
@@ -83,30 +90,19 @@ fn brightness_write_sends_the_write_and_events_the_device() {
 }
 
 #[test]
-fn brightness_write_persists_nothing() {
-    let (mut state, mut receiver) = keypad_state(true);
-    drain(&mut receiver);
-
-    let _ = state.commit_brightness(75);
-
-    // Brightness lives in the device: exactly one command, the write, and
-    // no config write — hence no agent config reload beside it.
-    let commands = drain(&mut receiver);
-    assert_eq!(commands.len(), 1);
-    assert!(matches!(
-        commands[0],
-        Command::SetBrightness(SetBrightness { .. })
-    ));
-}
-
-#[test]
 fn brightness_write_is_inert_without_the_control() {
     let (mut state, mut receiver) = keypad_state(false);
     drain(&mut receiver);
     assert!(!state.current_brightness_supported());
+    let config_key = state
+        .current_record()
+        .and_then(DeviceRecord::persistent_config_key)
+        .expect("persistent")
+        .to_string();
 
     let _ = state.commit_brightness(75);
 
+    assert_eq!(state.config.brightness(&config_key), None);
     assert!(drain(&mut receiver).is_empty());
 }
 
