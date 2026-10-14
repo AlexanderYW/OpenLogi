@@ -106,8 +106,8 @@ pub use succession::Identity;
 ///      the main wheel as a virtual thumb wheel; `AgentSnapshot::lights`
 ///      appended — what each standalone light reached over HID++ `0x1990`
 ///      reads back, and the settings changed on the light itself;
-///      `Capabilities::{brightness,
-///      creative_keypad}`, `Agent::{read_brightness, set_brightness}` and
+///      `Capabilities::brightness`,
+///      `Agent::{read_brightness, set_brightness}` and
 ///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
 ///      `0x8040` device brightness.
 pub const PROTOCOL_VERSION: u32 = 37;
