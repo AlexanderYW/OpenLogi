@@ -779,6 +779,24 @@ pub(crate) fn keep_os_layout_in_background(
     );
 }
 
+/// Spawn an OS thread that re-applies the persisted BrightnessControl `level`
+/// to `op`'s device via [`openlogi_hid::restore_brightness_on`], which writes
+/// only a device that forgets its level on a power cycle. Returns
+/// immediately; failures are logged.
+pub(crate) fn restore_brightness_in_background(op: DeviceOp, level: u16) {
+    let index = op.route.device_index();
+    op.spawn_write(
+        "brightness restore",
+        move |c| async move { openlogi_hid::restore_brightness_on(&c, level).await },
+        move |result| {
+            log_outcome(index, "brightness restore", result, |state| match state {
+                Some(state) => debug!(index, level, applied = state.level, "brightness restored"),
+                None => debug!(index, "device keeps its own brightness — restore skipped"),
+            });
+        },
+    );
+}
+
 /// The settings a mouse forgets when it power-cycles, as one reapply pushes
 /// them. `None` leaves that setting alone.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
