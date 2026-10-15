@@ -8,9 +8,10 @@ use openlogi_core::binding::ActionRingSlot;
 use openlogi_core::config::Lighting;
 use openlogi_core::device::DeviceInventory;
 use openlogi_core::hid::{
-    BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus, Dpi,
-    DpiInfo, EasySwitchHosts, EasySwitchSlot, FnLockState, HostConnection, LightCommand,
-    PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo, ScrollWheelMode, SmartShiftStatus,
+    BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus,
+    BrightnessState, Dpi, DpiInfo, EasySwitchHosts, EasySwitchSlot, FnLockState, HostConnection,
+    LightCommand, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo, ScrollWheelMode,
+    SmartShiftStatus,
 };
 use openlogi_fixture::{
     CANONICAL_DEVICE_PROFILE_JSON, SyntheticIdentityKind, classify_synthetic_identity_bytes,
@@ -43,6 +44,7 @@ enum ReadFamily {
     FnLock,
     ReportRate,
     EasySwitch,
+    Brightness,
 }
 
 #[derive(Clone)]
@@ -371,6 +373,28 @@ impl Agent for TestAgent {
         _name: String,
     ) -> Result<EasySwitchHosts, WriteError> {
         unreachable!("profile capture must never rename a host")
+    }
+
+    async fn read_brightness(
+        self,
+        _: TarpcContext,
+        route: DeviceRoute,
+    ) -> Result<BrightnessState, WriteError> {
+        self.read(
+            ReadFamily::Brightness,
+            &route,
+            |settings| &settings.brightness,
+            0x8040,
+        )
+    }
+
+    async fn set_brightness(
+        self,
+        _: TarpcContext,
+        _route: DeviceRoute,
+        _level: u16,
+    ) -> Result<BrightnessState, WriteError> {
+        unreachable!("profile capture must never write brightness")
     }
 }
 

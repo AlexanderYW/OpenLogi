@@ -358,6 +358,17 @@ async fn capture_hidpp_settings(
         sanitize::easy_switch_hosts(hosts);
     }
 
+    let brightness = match capability_setting(device.online, capabilities.brightness) {
+        Some(setting) => setting,
+        None => {
+            semantic_read(
+                "brightness",
+                agent::call(client.read_brightness(context::current(), source_route.clone())),
+            )
+            .await?
+        }
+    };
+
     Ok(ProfileDeviceSettings {
         route: profile_route,
         dpi,
@@ -367,6 +378,7 @@ async fn capture_hidpp_settings(
         fn_lock,
         report_rate,
         easy_switch,
+        brightness,
         lighting: profile_support(capabilities.lighting),
         light: ProfileSupport::Unsupported,
     })
@@ -427,6 +439,7 @@ fn capture_standalone(source: &StandaloneDevice) -> Result<ProfileCaptureParts> 
         fn_lock: ProfileSetting::Unsupported,
         report_rate: ProfileSetting::Unsupported,
         easy_switch: ProfileSetting::Unsupported,
+        brightness: ProfileSetting::Unsupported,
         lighting: ProfileSupport::Unsupported,
         light: profile_support(light_supported),
     };

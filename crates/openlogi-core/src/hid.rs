@@ -9,6 +9,7 @@
 //! HID stack.
 
 pub mod backlight;
+pub mod brightness;
 pub mod dpi;
 pub mod easy_switch;
 pub mod error;
@@ -23,6 +24,8 @@ pub mod smartshift;
 pub use backlight::{
     BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus,
 };
+
+pub use brightness::BrightnessState;
 pub use dpi::{Dpi, DpiCapabilities, DpiInfo};
 pub use easy_switch::{EasySwitchHosts, EasySwitchSlot, HostConnection, HostOsInfo, HostOsKind};
 pub use error::{HidppFeatureErrorKind, HidppOperation, WriteError};
