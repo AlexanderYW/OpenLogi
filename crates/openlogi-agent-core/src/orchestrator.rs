@@ -637,14 +637,10 @@ impl Orchestrator {
             .filter(|d| d.kind.is_keyboard_family() && d.route.is_some())
             .filter(|d| self.config.device_enabled(&d.config_key))
             .filter_map(|dev| {
-                let stored = button_bindings_for(
-                    &self.config,
-                    Some(&dev.config_key),
-                    self.current_app.as_deref(),
-                );
+                let stored = self.foreground_key_bindings(&dev.config_key);
                 // Capture from every page; dispatch the current page's.
                 let divert = keyboard_divert_set(&stored);
-                let bindings = bindings_on_page(&stored, self.keypad_page(&dev.config_key));
+                let bindings = self.current_page_of(&dev.config_key, &stored);
                 (!divert.wanted.is_empty() || !divert.grid.is_empty()).then_some(
                     KeyboardCandidate {
                         dev,
@@ -676,6 +672,22 @@ impl Orchestrator {
 
     /// The binding page `config_key`'s keypad is on: the last page turned to,
     /// or page 1 — also when the config has since removed that page.
+    /// `config_key`'s stored bindings for the foreground app, across every
+    /// keypad page.
+    fn foreground_key_bindings(&self, config_key: &str) -> BTreeMap<ButtonId, Binding> {
+        button_bindings_for(&self.config, Some(config_key), self.current_app.as_deref())
+    }
+
+    /// The part of `stored` that `config_key`'s keys act on now: its current
+    /// keypad page.
+    fn current_page_of(
+        &self,
+        config_key: &str,
+        stored: &BTreeMap<ButtonId, Binding>,
+    ) -> BTreeMap<ButtonId, Binding> {
+        bindings_on_page(stored, self.keypad_page(config_key))
+    }
+
     fn keypad_page(&self, config_key: &str) -> KeypadPage {
         self.keypad_pages
             .get(config_key)
@@ -782,13 +794,9 @@ impl Orchestrator {
             .filter_map(|dev| {
                 let route = dev.route.clone()?;
                 let display = key_display_for(&route)?;
-                let bindings = bindings_on_page(
-                    &button_bindings_for(
-                        &self.config,
-                        Some(&dev.config_key),
-                        self.current_app.as_deref(),
-                    ),
-                    self.keypad_page(&dev.config_key),
+                let bindings = self.current_page_of(
+                    &dev.config_key,
+                    &self.foreground_key_bindings(&dev.config_key),
                 );
                 let faces = GridKey::ALL
                     .into_iter()
