@@ -899,16 +899,16 @@ fn grid_key_index_mapping_is_row_major_and_total() {
 fn grid_key_positions_are_the_row_major_grid_the_device_reports() {
     let mut cells = std::collections::HashSet::new();
     for key in GridKey::ALL {
-        let (row, col) = key.position();
+        let position = key.position();
         assert_eq!(
-            row * 3 + col,
-            usize::from(key.index()) - 1,
+            position.row * 3 + position.col,
+            u16::from(key.index()) - 1,
             "{key:?} position"
         );
-        cells.insert((row, col));
+        cells.insert(position);
     }
     assert_eq!(cells.len(), 9, "the nine keys fill distinct cells");
-    assert!(cells.iter().all(|&(row, col)| row < 3 && col < 3));
+    assert!(cells.iter().all(|cell| cell.row < 3 && cell.col < 3));
 }
 
 #[test]

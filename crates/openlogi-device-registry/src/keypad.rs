@@ -37,34 +37,69 @@ impl KeypadDescriptor {
     }
 }
 
+/// A key's cell on a keypad's grid, zero-based from the top-left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyPosition {
+    /// Row, counted down from the top.
+    pub row: u16,
+    /// Column, counted right from the left.
+    pub col: u16,
+}
+
+/// A point on a keypad's LCD panel, in panel pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanelPoint {
+    /// Pixels from the panel's left edge.
+    pub x: u16,
+    /// Pixels from the panel's top edge.
+    pub y: u16,
+}
+
+/// How many rows and columns of keys a grid has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyGrid {
+    /// Rows of keys.
+    pub rows: u16,
+    /// Columns of keys.
+    pub cols: u16,
+}
+
+impl KeyGrid {
+    /// Whether `key` falls on this grid.
+    #[must_use]
+    pub const fn contains(self, key: KeyPosition) -> bool {
+        key.row < self.rows && key.col < self.cols
+    }
+}
+
 /// Where a keypad's square LCD keys sit on its panel, in panel pixels.
 ///
-/// Keys are laid out on a regular grid: key `(row, col)` (zero-based from the
-/// top-left) is the `key_size`-square tile whose top-left corner is
+/// Keys are laid out on a regular grid: the key at `(row, col)` is the
+/// `key_size`-square tile whose top-left corner is
 /// `origin + (col, row) · pitch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyDisplay {
     /// Side length of one key's tile.
     pub key_size: u16,
-    /// Top-left corner of the top-left key, as `(x, y)`.
-    pub origin: (u16, u16),
+    /// Top-left corner of the top-left key.
+    pub origin: PanelPoint,
     /// Distance between the top-left corners of adjacent keys.
     pub pitch: u16,
-    /// Rows and columns of keys.
-    pub grid: (u16, u16),
+    /// The panel's key grid.
+    pub grid: KeyGrid,
 }
 
 impl KeyDisplay {
-    /// The top-left corner of key `(row, col)`, or `None` off the grid.
+    /// The top-left corner of the key at `key`, or `None` off the grid.
     #[must_use]
-    pub const fn key_origin(&self, row: u16, col: u16) -> Option<(u16, u16)> {
-        if row >= self.grid.0 || col >= self.grid.1 {
+    pub const fn key_origin(&self, key: KeyPosition) -> Option<PanelPoint> {
+        if !self.grid.contains(key) {
             return None;
         }
-        Some((
-            self.origin.0 + col * self.pitch,
-            self.origin.1 + row * self.pitch,
-        ))
+        Some(PanelPoint {
+            x: self.origin.x + key.col * self.pitch,
+            y: self.origin.y + key.row * self.pitch,
+        })
     }
 }
 
@@ -74,9 +109,9 @@ impl KeyDisplay {
 /// each key edge to edge, in row-major order.
 const MX_CREATIVE_KEYPAD_DISPLAY: KeyDisplay = KeyDisplay {
     key_size: 118,
-    origin: (23, 6),
+    origin: PanelPoint { x: 23, y: 6 },
     pitch: 158,
-    grid: (3, 3),
+    grid: KeyGrid { rows: 3, cols: 3 },
 };
 
 /// All standalone keypad identities OpenLogi recognizes.
@@ -97,7 +132,15 @@ pub fn find_keypad(vendor_id: u16, product_id: u16) -> Option<&'static KeypadDes
 
 #[cfg(test)]
 mod tests {
-    use super::{KEYPADS, KeyDisplay, find_keypad};
+    use super::{KEYPADS, KeyDisplay, KeyGrid, KeyPosition, PanelPoint, find_keypad};
+
+    const fn at(row: u16, col: u16) -> KeyPosition {
+        KeyPosition { row, col }
+    }
+
+    const fn point(x: u16, y: u16) -> PanelPoint {
+        PanelPoint { x, y }
+    }
     use crate::LOGITECH_VENDOR_ID;
 
     #[test]
@@ -128,11 +171,11 @@ mod tests {
             .and_then(|keypad| keypad.key_display)
             .expect("the MX Creative Keypad's keys are displays");
 
-        assert_eq!(display.key_origin(0, 0), Some((23, 6)));
-        assert_eq!(display.key_origin(0, 2), Some((339, 6)));
-        assert_eq!(display.key_origin(2, 1), Some((181, 322)));
+        assert_eq!(display.key_origin(at(0, 0)), Some(point(23, 6)));
+        assert_eq!(display.key_origin(at(0, 2)), Some(point(339, 6)));
+        assert_eq!(display.key_origin(at(2, 1)), Some(point(181, 322)));
         // The last key still fits the 480-pixel panel.
-        let (x, y) = display.key_origin(2, 2).expect("bottom-right key");
+        let PanelPoint { x, y } = display.key_origin(at(2, 2)).expect("bottom-right key");
         assert!(x + display.key_size <= 480 && y + display.key_size <= 480);
     }
 
@@ -140,13 +183,13 @@ mod tests {
     fn key_origin_is_none_off_the_grid() {
         let display = KeyDisplay {
             key_size: 10,
-            origin: (0, 0),
+            origin: PanelPoint { x: 0, y: 0 },
             pitch: 12,
-            grid: (2, 3),
+            grid: KeyGrid { rows: 2, cols: 3 },
         };
-        assert_eq!(display.key_origin(1, 2), Some((24, 12)));
-        assert!(display.key_origin(2, 0).is_none());
-        assert!(display.key_origin(0, 3).is_none());
+        assert_eq!(display.key_origin(at(1, 2)), Some(point(24, 12)));
+        assert!(display.key_origin(at(2, 0)).is_none());
+        assert!(display.key_origin(at(0, 3)).is_none());
     }
 
     #[test]

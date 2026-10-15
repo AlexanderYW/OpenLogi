@@ -5,6 +5,7 @@ use std::fmt;
 use std::num::NonZeroU8;
 use std::str::FromStr;
 
+use openlogi_device_registry::keypad::KeyPosition;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
@@ -363,9 +364,13 @@ impl GridKey {
     /// so a GUI drawing the device's keycap grid must not re-derive the
     /// mapping from another number.
     #[must_use]
-    pub const fn position(self) -> (usize, usize) {
-        let idx = self.index() as usize - 1;
-        (idx / 3, idx % 3)
+    pub const fn position(self) -> KeyPosition {
+        const COLUMNS: u16 = 3;
+        let idx = self.index() as u16 - 1;
+        KeyPosition {
+            row: idx / COLUMNS,
+            col: idx % COLUMNS,
+        }
     }
 
     /// The 1-based index the device's vendor report carries for this key.
