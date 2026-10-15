@@ -22,8 +22,8 @@ pub struct KeypadDescriptor {
     pub product_id: u16,
     /// Marketed product name.
     pub name: &'static str,
-    /// The LCD panel behind the key grid, when the keys are displays.
-    pub key_display: Option<KeyDisplay>,
+    /// The LCD panel behind the key grid.
+    pub key_display: KeyDisplay,
 }
 
 impl KeypadDescriptor {
@@ -32,7 +32,7 @@ impl KeypadDescriptor {
             vendor_id: LOGITECH_VENDOR_ID,
             product_id,
             name,
-            key_display: Some(key_display),
+            key_display,
         }
     }
 }
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn mx_creative_keypad_keys_sit_on_the_verified_panel_grid() {
         let display = find_keypad(LOGITECH_VENDOR_ID, 0xc354)
-            .and_then(|keypad| keypad.key_display)
+            .map(|keypad| keypad.key_display)
             .expect("the MX Creative Keypad's keys are displays");
 
         assert_eq!(display.key_origin(at(0, 0)), Some(point(23, 6)));
