@@ -32,16 +32,25 @@ use crate::services::assets::ResolvedAsset;
 use crate::state::AppState;
 use crate::ui::theme::{self, ACCENT_BLUE, Palette, Typography as _};
 
+/// A keypad's last binding page — the one the page bar can remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LastPage {
+    /// The page.
+    pub(super) page: KeypadPage,
+    /// Whether any profile binds a key on it, so removing it loses bindings.
+    pub(super) binds_keys: bool,
+}
+
 /// A keypad's binding pages: pick the page the grid keys are edited on, add
 /// one after the last, or remove the last. Removing a page that still binds
 /// keys asks first, because its bindings go with it; an empty one just goes.
 pub(super) fn keypad_page_bar(
     page: KeypadPage,
-    last: KeypadPage,
-    last_page_bound: bool,
+    last_page: LastPage,
     view: &Entity<FunctionRowView>,
     pal: &Palette,
 ) -> impl IntoElement {
+    let last = last_page.page;
     let pages: Vec<KeypadPage> = last.through().collect();
     let select = {
         let view = view.clone();
@@ -84,7 +93,7 @@ pub(super) fn keypad_page_bar(
         .disabled(remaining.is_none())
         .on_click(move |_, window, cx| {
             let Some(remaining) = remaining else { return };
-            if !last_page_bound {
+            if !last_page.binds_keys {
                 AppState::apply(cx, |state| state.commit_keypad_pages(remaining));
                 return;
             }
