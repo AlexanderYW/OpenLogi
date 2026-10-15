@@ -32,8 +32,9 @@
 //!   The session therefore reads it wherever the channel reads, deduplicating
 //!   frames rather than trusting per-node arrival.
 //! - A grid event is the first seven bytes of a **32-byte** report
-//!   `13 ff 02 00 [seq] 01 [key] …`: odd `seq` is a press, even the matching
-//!   release, `key` is the 1-based grid index. The node carries more than the
+//!   `13 ff 02 00 [seq] 01 [id, …]`: the NUL-terminated id list names every
+//!   key held at that moment, `id` being the 1-based grid index. A press
+//!   names the key; its release names none. The node carries more than the
 //!   20 bytes of a long HID++ message, so a reader must not truncate at 20.
 //! - Mapping run: pressing the nine keys in physical row-major order printed
 //!   the index sequence `1..=9`. The pinning lives in
@@ -42,12 +43,12 @@
 //!   (`node-logitech-mx-creative-console`,
 //!   `packages/core/src/services/input/mx-creative-keypad.ts`): the payload
 //!   is the same — `ff 02 00 [counter] 01 [id, …]`, ids NUL-terminated, so a
-//!   chord arrives as one frame naming every key that changed, and the
-//!   session decoder must read the whole list. The difference is edge
-//!   detection: the reference diffs the held-id sets of successive frames
-//!   and never reads the counter, but our capture shows release frames
-//!   re-encoding the key id (which that model would hold down), so here
-//!   sequence parity is the press/release signal.
+//!   chord arrives as one frame naming every held key — and so is edge
+//!   detection: diff the held-id sets of successive frames. An earlier
+//!   reading of this capture took `seq` parity as press/release with the
+//!   release re-encoding the id; a live agent capture (2026-10-15: press
+//!   `… c8 01 08`, release `… c9 01 00`, the counter wrapping `cf`→`c0`)
+//!   refuted it — `seq` is a rolling counter with no edge of its own.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -132,14 +133,15 @@ async fn window(
     }
 }
 
-/// A grid event is `13 ff 02 00 [seq] 01 [key]` — odd `seq` is a press, even
-/// a release. Every node mirrors the same stream, so reports are identified
-/// by `(seq, key, phase)` and not trusted per node.
-fn grid_event(buf: &[u8]) -> Option<(u8, u8, bool)> {
-    if buf.len() >= 7 && buf[0] == 0x13 && buf[1] == 0xff && buf[2] == 0x02 {
+/// A grid press is `13 ff 02 00 [seq] 01 [key]` naming the held key; its
+/// release names none, so it decodes to `None` here. Every node mirrors the
+/// same stream, so presses are identified by `(seq, key)` and not trusted
+/// per node.
+fn grid_event(buf: &[u8]) -> Option<(u8, u8)> {
+    if buf.len() >= 7 && buf[0] == 0x13 && buf[1] == 0xff && buf[2] == 0x02 && buf[3] == 0x00 {
         let (seq, key) = (buf[4], buf[6]);
         if (1..=9).contains(&key) {
-            Some((seq, key, seq % 2 == 1))
+            Some((seq, key))
         } else {
             None
         }
@@ -152,7 +154,7 @@ fn grid_event(buf: &[u8]) -> Option<(u8, u8, bool)> {
 /// indices have been seen once — no writes, no deadline pressure.
 async fn map_mode(nodes: &mut [Node]) {
     let start = Instant::now();
-    let mut seen: std::collections::BTreeSet<(u8, u8, bool)> = std::collections::BTreeSet::new();
+    let mut seen: std::collections::BTreeSet<(u8, u8)> = std::collections::BTreeSet::new();
     let mut order: Vec<u8> = Vec::new();
     println!(">> MAP mode: press each of the nine grid keys ONCE in your declared order.");
     println!("   No rush — 5 min budget, stops when all nine are seen.");
@@ -167,8 +169,8 @@ async fn map_mode(nodes: &mut [Node]) {
             {
                 Ok(Ok(0)) => {}
                 Ok(Ok(n)) => {
-                    if let Some((seq, key, press)) = grid_event(&buf[..n]) {
-                        if seen.insert((seq, key, press)) && press && !order.contains(&key) {
+                    if let Some((seq, key)) = grid_event(&buf[..n]) {
+                        if seen.insert((seq, key)) && !order.contains(&key) {
                             order.push(key);
                             println!("  press #{:>1} -> key index {}", order.len(), key);
                         }
