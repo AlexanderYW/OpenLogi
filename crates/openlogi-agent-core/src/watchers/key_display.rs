@@ -131,6 +131,35 @@ impl Painted {
     }
 }
 
+/// The keypads whose last image write failed, so a device that keeps
+/// refusing is reported once at `warn` rather than at every retry.
+#[derive(Debug, Default)]
+struct Failing {
+    routes: Vec<DeviceRoute>,
+}
+
+impl Failing {
+    /// Forget keypads that left `specs`: one that comes back is new.
+    fn retain(&mut self, specs: &[KeyDisplaySpec]) {
+        self.routes
+            .retain(|route| specs.iter().any(|spec| &spec.route == route));
+    }
+
+    /// Note a failed write on `route`; `true` when it was not already failing.
+    fn failed(&mut self, route: &DeviceRoute) -> bool {
+        if self.routes.contains(route) {
+            return false;
+        }
+        self.routes.push(route.clone());
+        true
+    }
+
+    /// Note an acknowledged write on `route`.
+    fn succeeded(&mut self, route: &DeviceRoute) {
+        self.routes.retain(|failing| failing != route);
+    }
+}
+
 /// Rendered tiles, by face and tile size: the same icon on two keys, or
 /// again after a rebind, is encoded once.
 #[derive(Default)]
@@ -165,11 +194,13 @@ async fn manage(
 ) -> ManagerCompletion {
     let mut painted = Painted::default();
     let mut tiles = Tiles::default();
+    let mut failing = Failing::default();
     loop {
         let wanted = Arc::clone(&specs.borrow_and_update());
         let pending = painted.plan(&wanted);
+        failing.retain(&wanted);
         let retry = tokio::select! {
-            failed = paint_all(&pending, &mut painted, &mut tiles, &access) => {
+            failed = paint_all(&pending, &mut painted, &mut failing, &mut tiles, &access) => {
                 failed.then(|| Instant::now() + RETRY_DELAY)
             }
             _ = &mut shutdown => return ManagerCompletion::Graceful,
@@ -195,6 +226,7 @@ async fn manage(
 async fn paint_all(
     pending: &[Paint],
     painted: &mut Painted,
+    failing: &mut Failing,
     tiles: &mut Tiles,
     access: &DeviceAccess,
 ) -> bool {
@@ -220,9 +252,16 @@ async fn paint_all(
             })
             .await;
         match result {
-            Ok(()) => painted.record(paint),
+            Ok(()) => {
+                painted.record(paint);
+                failing.succeeded(&paint.route);
+            }
             Err(error) => {
-                debug!(%error, route = %paint.route, key = ?paint.key, "key image write failed — retrying");
+                if failing.failed(&paint.route) {
+                    warn!(%error, route = %paint.route, key = ?paint.key, "key image write failed — retrying");
+                } else {
+                    debug!(%error, route = %paint.route, key = ?paint.key, "key image write failed again — retrying");
+                }
                 failed.push(&paint.route);
             }
         }
