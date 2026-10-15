@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{Action, ActionRingIcon, Binding, ButtonId, GridKey};
-use openlogi_core::bindings::{button_bindings_for, oshook_gestures_for};
+use openlogi_core::binding::{Action, ActionRingIcon, Binding, ButtonId, GridKey, KeypadPage};
+use openlogi_core::bindings::{bindings_on_page, button_bindings_for, oshook_gestures_for};
 use openlogi_core::config::{Config, LightSettings, MouseProfileTarget, canonical_device_key};
 use openlogi_core::device::{
     Capabilities, ChangedOnLight, DeviceInventory, DeviceKind, LightCapabilities, LightState,
@@ -42,6 +42,7 @@ use crate::hardware::{
 };
 use crate::observable::ObservableState;
 use crate::receiver_access::ReceiverAccess;
+use crate::runtime::PageTurn;
 use crate::runtime::hook::{HookMaps, SharedHookMaps};
 use crate::runtime::scroll::ScrollPreferences;
 use crate::watchers::host_switch::{HostSwitchLink, HostSwitchLinks};
@@ -372,6 +373,11 @@ pub struct Orchestrator {
     /// layout writes queued for them so a write withdraws itself once a
     /// reload turns the setting off or disables the device.
     kept_os_layouts: Arc<KeptOsLayouts>,
+    /// Each keypad's current binding page, by config key — runtime state the
+    /// page actions move and nothing persists: a fresh agent starts every
+    /// keypad on page 1. Read through [`Self::keypad_page`], which clamps a
+    /// page the config has since removed.
+    keypad_pages: BTreeMap<String, KeypadPage>,
     /// Whether the OS mouse hook is currently installed. Back/Forward gesture
     /// motion comes from HID++, but diversion is published only while the
     /// broader mouse-remapping path is available so losing the hook leaves the
@@ -478,6 +484,7 @@ impl Orchestrator {
             light_states: BTreeMap::new(),
             lights_changed_on_light: BTreeMap::new(),
             kept_os_layouts: Arc::default(),
+            keypad_pages: BTreeMap::new(),
             os_mouse_hook_available: false,
             capture_plans_tx,
             keyboard_spec_tx,
@@ -616,12 +623,14 @@ impl Orchestrator {
             })
             .filter(|d| self.config.device_enabled(&d.config_key))
             .filter_map(|dev| {
-                let bindings = button_bindings_for(
+                let stored = button_bindings_for(
                     &self.config,
                     Some(&dev.config_key),
                     self.current_app.as_deref(),
                 );
-                let divert = keyboard_divert_set(&bindings);
+                // Capture from every page; dispatch the current page's.
+                let divert = keyboard_divert_set(&stored);
+                let bindings = bindings_on_page(&stored, self.keypad_page(&dev.config_key));
                 (!divert.wanted.is_empty() || !divert.grid.is_empty()).then_some(
                     KeyboardCandidate {
                         dev,
@@ -649,6 +658,39 @@ impl Orchestrator {
             grid: chosen.divert.grid.clone(),
             bindings: chosen.bindings.clone(),
         })
+    }
+
+    /// The binding page `config_key`'s keypad is on: the last page turned to,
+    /// or page 1 — also when the config has since removed that page.
+    fn keypad_page(&self, config_key: &str) -> KeypadPage {
+        self.keypad_pages
+            .get(config_key)
+            .copied()
+            .filter(|page| *page <= self.config.keypad_pages(config_key))
+            .unwrap_or(KeypadPage::FIRST)
+    }
+
+    /// Move `device_key`'s keypad one page in `turn`'s direction, wrapping
+    /// within its configured pages, and republish what its keys dispatch and
+    /// show. A device with a single page (or no key) has nothing to turn.
+    pub fn turn_keypad_page(&mut self, device_key: Option<&str>, turn: PageTurn) {
+        let Some(key) = device_key else {
+            debug!("keypad page turn without a device — ignored");
+            return;
+        };
+        let last = self.config.keypad_pages(key);
+        if last == KeypadPage::FIRST {
+            debug!(key, "keypad page turn on a single-page device — ignored");
+            return;
+        }
+        let current = self.keypad_page(key);
+        let next = match turn {
+            PageTurn::Previous => current.previous_within(last),
+            PageTurn::Next => current.next_within(last),
+        };
+        info!(key, page = %next, of = %last, "keypad page turned");
+        self.keypad_pages.insert(key.to_owned(), next);
+        self.publish_device_runtime();
     }
 
     /// Rewrite every shared map from the current config + selected device.
@@ -726,14 +768,17 @@ impl Orchestrator {
             .filter_map(|dev| {
                 let route = dev.route.clone()?;
                 let display = key_display_for(&route)?;
-                let bindings = button_bindings_for(
-                    &self.config,
-                    Some(&dev.config_key),
-                    self.current_app.as_deref(),
+                let bindings = bindings_on_page(
+                    &button_bindings_for(
+                        &self.config,
+                        Some(&dev.config_key),
+                        self.current_app.as_deref(),
+                    ),
+                    self.keypad_page(&dev.config_key),
                 );
                 let faces = GridKey::ALL
                     .into_iter()
-                    .map(|key| (key, key_face(bindings.get(&ButtonId::Grid(key)))))
+                    .map(|key| (key, key_face(bindings.get(&ButtonId::grid(key)))))
                     .collect();
                 Some(KeyDisplaySpec {
                     route,
@@ -1509,10 +1554,13 @@ fn keyboard_divert_set(bindings: &BTreeMap<ButtonId, Binding>) -> KeyboardDivert
     let mut set = KeyboardDivertSet::default();
     for (button, binding) in bindings {
         // A grid key's identity is its position, and the session observes it
-        // without writing anything.
-        if let Some(key) = button.grid_key() {
+        // without writing anything. Bound on any page, the physical key joins
+        // the observed set, so a page turn — which only changes what a press
+        // dispatches — never changes the capture identity and never restarts
+        // the session.
+        if let Some(slot) = button.grid_slot() {
             if is_bound_key(binding) {
-                set.grid.insert(key.index(), *button);
+                set.grid.insert(slot.key.index(), ButtonId::grid(slot.key));
             }
             continue;
         }

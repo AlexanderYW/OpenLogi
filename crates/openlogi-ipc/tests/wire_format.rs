@@ -33,7 +33,9 @@ use std::fmt::Write;
 
 use bincode::Options;
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{ActionRingIcon, ActionRingSlot, KeyCombo};
+use openlogi_core::binding::{
+    Action, ActionRingIcon, ActionRingSlot, ButtonId, GridKey, GridSlot, KeyCombo, KeypadPage,
+};
 use openlogi_core::config::{Lighting, ScrollResolution};
 use openlogi_core::device::{
     BatteryInfo, BatteryLevel, BatteryStatus, Capabilities, ChangedOnLight, DeviceInventory,
@@ -400,6 +402,21 @@ fn action_ring_types() {
     assert_wire(&HidppOperation::ReadBrightness, "17");
     assert_wire(&HidppOperation::WriteBrightness, "18");
     assert_wire(&HidppOperation::WriteKeyImage, "19");
+}
+
+/// The keypad page actions are appended `Action` variants, and a later page's
+/// grid slot crosses the wire by its persisted name.
+#[test]
+fn keypad_page_actions_and_slots() {
+    assert_wire(&Action::PreviousKeypadPage, "36");
+    assert_wire(&Action::NextKeypadPage, "37");
+    assert_wire(
+        &ButtonId::Grid(GridSlot {
+            page: KeypadPage::new(2).expect("page 2 exists"),
+            key: GridKey::Middle,
+        }),
+        "1070616765323a677269644d6964646c65",
+    );
 }
 
 #[test]
