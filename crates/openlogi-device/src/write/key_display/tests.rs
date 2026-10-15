@@ -29,7 +29,7 @@ fn hardware_ack() -> Vec<u8> {
 
 async fn keypad(acks: bool) -> (SharedChannel, ReplayChannelHandle) {
     let (raw, handle) = ScriptedRawHidChannel::with_dynamic_responder(move |request| {
-        (acks && request.first() == Some(&IMAGE_REPORT_ID)).then(hardware_ack)
+        (acks && request.first() == Some(&IMAGE_HEADER[0])).then(hardware_ack)
     });
     (
         SharedChannel::new(scripted_channel(raw).await, KEYPAD),
@@ -149,7 +149,7 @@ async fn a_written_tile_lands_at_its_key_and_completes_on_the_ack() {
     let images: Vec<_> = handle
         .written_reports()
         .into_iter()
-        .filter(|report| report.first() == Some(&IMAGE_REPORT_ID))
+        .filter(|report| report.first() == Some(&IMAGE_HEADER[0]))
         .collect();
     assert_eq!(images.len(), 1);
     // Bottom-middle is row 2, column 1: (23 + 158, 6 + 2·158).
@@ -189,6 +189,6 @@ async fn a_key_off_the_panel_writes_nothing() {
         !handle
             .written_reports()
             .iter()
-            .any(|report| report.first() == Some(&IMAGE_REPORT_ID))
+            .any(|report| report.first() == Some(&IMAGE_HEADER[0]))
     );
 }
