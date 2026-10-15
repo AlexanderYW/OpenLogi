@@ -196,6 +196,16 @@ pub struct Capabilities {
     /// there too. Appended: crosses the IPC and the persisted identity.
     #[serde(default)]
     pub pointer_scaling: bool,
+    /// Device brightness (display illumination) — HID++ `0x8040`. Read as a
+    /// default when absent, so this branch can read the dev config written by
+    /// the creative-keypad worktree; serialized on this branch's (renumbered)
+    /// wire, kept as `false` for devices that do not report `0x8040`.
+    #[serde(default)]
+    pub brightness: bool,
+    /// Marker set by the MX Creative Console family probe; read with its
+    /// default for the same config-compatibility reason as `brightness`.
+    #[serde(default)]
+    pub creative_keypad: bool,
 }
 
 impl Capabilities {
@@ -232,6 +242,9 @@ impl Capabilities {
             // cannot say which controls report raw wheel.
             virtual_thumbwheel: false,
             pointer_scaling: !pointer && ids.contains(&0x2205),
+            brightness: ids.contains(&0x8040),
+            // Filled by the device layer's control-table walk, never here.
+            creative_keypad: false,
         }
     }
 
@@ -753,6 +766,8 @@ mod tests {
                     easy_switch: false,
                     virtual_thumbwheel: false,
                     pointer_scaling: false,
+                    brightness: false,
+                    creative_keypad: false,
                 }),
                 settings_revision: 0,
             }],
@@ -872,6 +887,8 @@ mod tests {
                 easy_switch: false,
                 virtual_thumbwheel: false,
                 pointer_scaling: false,
+                brightness: false,
+                creative_keypad: false,
             }
         );
         assert!(!Capabilities::from_feature_ids(&[0x0003, 0x1b04]).thumbwheel);
@@ -896,6 +913,8 @@ mod tests {
                 easy_switch: false,
                 virtual_thumbwheel: false,
                 pointer_scaling: false,
+                brightness: false,
+                creative_keypad: false,
             }
         );
         // No driving features → nothing offered.

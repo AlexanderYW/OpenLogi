@@ -1024,6 +1024,8 @@ fn tabs_prefer_buttons_when_a_keyboard_kind_measures_a_pointer() {
         easy_switch: false,
         virtual_thumbwheel: false,
         pointer_scaling: false,
+        brightness: false,
+        creative_keypad: false,
     });
     let tabs = DetailTab::tabs_for(&record(DeviceKind::Keyboard, caps));
     assert!(
@@ -1058,6 +1060,8 @@ fn tabs_follow_capabilities_not_kind() {
         easy_switch: false,
         virtual_thumbwheel: false,
         pointer_scaling: false,
+        brightness: false,
+        creative_keypad: false,
     });
     // After 0x0005 kind-correction the record has kind=Mouse, not Keyboard.
     let tabs = DetailTab::tabs_for(&record(DeviceKind::Mouse, caps));
@@ -1139,6 +1143,8 @@ fn keyboard_without_asset_hides_buttons_tab() {
         easy_switch: false,
         virtual_thumbwheel: false,
         pointer_scaling: false,
+        brightness: false,
+        creative_keypad: false,
     });
     let tabs = DetailTab::tabs_for(&record(DeviceKind::Keyboard, caps));
     assert!(
@@ -1167,6 +1173,8 @@ fn keyboard_with_buttons_shows_keys_tab() {
         easy_switch: false,
         virtual_thumbwheel: false,
         pointer_scaling: false,
+        brightness: false,
+        creative_keypad: false,
     });
     let keyboard = record(DeviceKind::Keyboard, caps);
     let tabs = DetailTab::tabs_for(&keyboard);
