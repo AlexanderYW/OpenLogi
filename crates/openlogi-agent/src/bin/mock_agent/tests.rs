@@ -220,6 +220,82 @@ async fn profile_backed_wheel_and_backlight_reads_return_exact_values() {
     );
 }
 
+/// A scripted BrightnessControl reads its stored state, and a write echoes
+/// the level the "firmware" applied — clamped into the advertised range,
+/// never rejected and never the raw request.
+#[tokio::test]
+async fn brightness_echoes_the_clamped_level_it_applied() {
+    let initial = BrightnessState {
+        level: 160,
+        min: 0,
+        max: 255,
+        steps: 0,
+    };
+    let mut profile = built_in_profile().expect("built-in profile should construct");
+    profile.settings[0].brightness = ProfileSetting::Supported(initial);
+    let agent = MockAgent::new(
+        State::new(profile, MockClock::Test(Duration::ZERO))
+            .expect("brightness profile should validate"),
+    );
+
+    assert_eq!(
+        agent
+            .clone()
+            .read_brightness(tarpc::context::current(), mouse_route())
+            .await
+            .expect("scripted brightness should read"),
+        initial
+    );
+    let applied = agent
+        .clone()
+        .set_brightness(tarpc::context::current(), mouse_route(), 90)
+        .await
+        .expect("in-range write should succeed");
+    assert_eq!(applied.level, 90);
+    let clamped = agent
+        .clone()
+        .set_brightness(tarpc::context::current(), mouse_route(), 4096)
+        .await
+        .expect("an over-range write clamps like firmware, not rejects");
+    assert_eq!(
+        clamped,
+        BrightnessState {
+            level: 255,
+            ..initial
+        }
+    );
+    assert_eq!(
+        agent
+            .read_brightness(tarpc::context::current(), mouse_route())
+            .await
+            .expect("the clamped level is what the device now reports")
+            .level,
+        255
+    );
+}
+
+#[tokio::test]
+async fn brightness_on_a_device_without_the_feature_is_unsupported() {
+    let agent = MockAgent::new(test_state());
+    assert!(matches!(
+        agent
+            .clone()
+            .read_brightness(tarpc::context::current(), mouse_route())
+            .await,
+        Err(WriteError::FeatureUnsupported {
+            feature_hex: 0x8040
+        })
+    ));
+    assert!(matches!(
+        agent
+            .set_brightness(tarpc::context::current(), mouse_route(), 10)
+            .await,
+        Err(WriteError::FeatureUnsupported {
+            feature_hex: 0x8040
+        })
+    ));
+}
+
 #[tokio::test]
 async fn backlight_changes_are_kept_and_unoffered_ones_refused() {
     let manual = BacklightState {
