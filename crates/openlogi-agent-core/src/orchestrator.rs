@@ -634,9 +634,7 @@ impl Orchestrator {
         let candidates: Vec<KeyboardCandidate<'_>> = self
             .devices
             .iter()
-            .filter(|d| {
-                matches!(d.kind, DeviceKind::Keyboard | DeviceKind::Numpad) && d.route.is_some()
-            })
+            .filter(|d| d.kind.is_keyboard_family() && d.route.is_some())
             .filter(|d| self.config.device_enabled(&d.config_key))
             .filter_map(|dev| {
                 let stored = button_bindings_for(
@@ -874,12 +872,11 @@ impl Orchestrator {
             if !self.config.device_enabled(&dev.config_key) {
                 continue;
             }
-            let (app, pointer_target) =
-                if matches!(dev.kind, DeviceKind::Keyboard | DeviceKind::Numpad) {
-                    (self.current_app.as_deref(), None)
-                } else {
-                    self.mouse_context()
-                };
+            let (app, pointer_target) = if dev.kind.is_keyboard_family() {
+                (self.current_app.as_deref(), None)
+            } else {
+                self.mouse_context()
+            };
             let mut plan = plan_for_device(
                 &self.config,
                 physical_key,
