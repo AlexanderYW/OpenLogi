@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use hidpp::channel::{ChannelError, HidppChannel};
+use hidpp::channel::HidppChannel;
 use hidpp::device::Device;
 use hidpp::feature::CreatableFeature;
 use hidpp::feature::device_information::DeviceInformationFeature;
@@ -17,7 +17,8 @@ use openlogi_core::color::Rgb;
 use tracing::{debug, warn};
 
 use super::{
-    FRAME_GAP, HidppOperation, WriteError, WriteScope, classify_hidpp_error, open_feature,
+    FRAME_GAP, HidppOperation, WriteError, WriteScope, classify_channel_error,
+    classify_hidpp_error, open_feature,
 };
 
 const FEATURE: u16 = 0x8071;
@@ -300,9 +301,7 @@ async fn unit_id(device: &mut Device) -> Result<Option<[u8; 4]>, WriteError> {
         .get_device_info()
         .await
         .map_err(|error| match error {
-            Hidpp20Error::Channel(ChannelError::Timeout) => WriteError::RequestTimedOut {
-                operation: HidppOperation::Lighting,
-            },
+            Hidpp20Error::Channel(error) => classify_channel_error(error, HidppOperation::Lighting),
             other => classify_hidpp_error(
                 other,
                 HidppOperation::Lighting,
@@ -352,9 +351,7 @@ async fn discover(
 
 fn classify(error: Hidpp20Error) -> WriteError {
     match error {
-        Hidpp20Error::Channel(ChannelError::Timeout) => WriteError::RequestTimedOut {
-            operation: HidppOperation::Lighting,
-        },
+        Hidpp20Error::Channel(error) => classify_channel_error(error, HidppOperation::Lighting),
         other => classify_hidpp_error(other, HidppOperation::Lighting, FEATURE),
     }
 }
