@@ -9,10 +9,11 @@
 //! Which keys appear is the asset's call (see [`key_points::key_surface`]): a
 //! depot with control markers shows the keyboard's own HID++ controls on the
 //! photo, each bound per device through [`AppState::commit_binding`] and
-//! diverted by the agent while bound; a keypad whose depot marks its keys
-//! puts those keycaps on the device render itself; a markerless keypad shows
-//! its own keycaps drawn from the device model beside the render, bound the
-//! same per-device way; any other markerless device shows the OS-hook F-row,
+//! diverted by the agent while bound; a keypad whose depot marks its keys,
+//! or whose render is the stock one OpenLogi measured, has its keys drawn on
+//! the device render itself, the way Options+ shows it; any other keypad
+//! shows its own keycaps drawn from the device model beside the render, bound
+//! the same per-device way; any other markerless device shows the OS-hook F-row,
 //! bound globally through [`AppState::commit_keyboard_binding`]. The panel
 //! lists the same action catalog the mouse picker uses, plus a Power User
 //! section.
@@ -41,10 +42,12 @@ use gpui_component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants 
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
-    Disableable as _, IconName, Selectable as _, Sizable as _, WindowExt as _, h_flex,
+    Disableable as _, Icon, IconName, Selectable as _, Sizable as _, WindowExt as _, h_flex,
     input::InputState, v_flex,
 };
-use openlogi_core::binding::{Action, ButtonId, Cid, GridKey, KeypadPage, WorkflowStep};
+use openlogi_core::binding::{
+    Action, ActionRingIcon, ButtonId, Cid, GridKey, KeypadPage, WorkflowStep,
+};
 use openlogi_core::device::DeviceKind;
 
 use super::editors::{
@@ -71,7 +74,8 @@ pub(crate) use key_points::KeyTarget;
 #[cfg(test)]
 use key_points::{EVEN_SPACING_END, EVEN_SPACING_START, key_x_fractions};
 use key_points::{
-    KEYCAP_H, KEYCAP_PAGING_H, KEYCAP_W, KeySurface, is_paging_cid, key_surface, keypad_canvas,
+    KEYCAP_H, KEYCAP_PAGING_H, KEYCAP_W, KeyShape, KeySurface, is_paging_cid, key_surface,
+    keypad_canvas, photo_key_shape,
 };
 
 /// Width of the config panel (CSS px) when a key is selected.
@@ -269,7 +273,7 @@ impl Render for FunctionRowView {
         let image_path = asset.map(|asset| asset.image_path.clone());
         let surface = key_surface(asset, kind);
         let keypad = matches!(surface, KeySurface::Keypad(_));
-        // A depot-marked keypad puts its caps on the render itself: the
+        // A keypad on its photo draws its keys on the render itself: the
         // keyboard's callout band cannot lay eleven bubbles across a
         // portrait render, and the keys sit under the user's eyes already.
         let keypad_photo =
@@ -515,6 +519,9 @@ struct KeySlot {
     y_frac: f32,
     binding: SharedString,
     binding_icon: Option<&'static str>,
+    /// The glyph the keypad's LCD shows for this key's binding — the agent
+    /// paints exactly this icon on the device, so the render mirrors it.
+    lcd_icon: Option<&'static str>,
 }
 
 /// One [`KeySlot`] per displayed key, each carrying the action it is bound
@@ -540,6 +547,9 @@ fn key_slots_from_layouts(
                 y_frac: layout.point.y_frac,
                 binding: binding_label(bound.as_ref()),
                 binding_icon: bound.as_ref().map(action_icon_path),
+                lcd_icon: bound
+                    .as_ref()
+                    .map(|action| ActionRingIcon::for_action(action).asset_path()),
                 target: layout.target,
             }
         })
@@ -818,12 +828,14 @@ impl RenderOnce for KeypadPane {
     }
 }
 
-/// A depot-marked keypad: the device render with its own keycaps drawn on
-/// the keys. The depot's markers name the physical key each cap sits on —
-/// the grid keys row-major, the paging controls at their printed places —
-/// so the click targets *are* the device, and the same cap, tooltip,
-/// binding, and selection machinery serves on either side of the seam.
-/// Nothing is invented here that the depot did not author.
+/// A keypad drawn the way the device looks: its render with each key mapped
+/// onto the physical key the depot's markers (or the stock render's measured
+/// centres) name. An LCD
+/// grid key shows the face the agent paints on the device — the bound
+/// action's glyph, white on black, or nothing when the key does nothing —
+/// and the paging keys stay the printed keys of the render, outlined when
+/// hovered or selected. Every key is its own click target, opening the same
+/// panel as any other key.
 #[derive(IntoElement)]
 struct KeypadPhotoPane {
     slots: Vec<KeySlot>,
@@ -876,38 +888,155 @@ impl RenderOnce for KeypadPhotoPane {
             .w(px(img_w))
             .h(px(img_h))
             .child(image_or_fallback(self.image, img_w, img_h, &pal))
-            .children(self.slots.into_iter().map(move |slot| {
-                let highlighted = key_is_highlighted(slot.idx, selected, hovered);
-                let cap = overlay_cap(&slot.target, (img_w, img_h));
-                KeyCap {
-                    slot,
-                    highlighted,
-                    canvas: (img_w, img_h),
-                    cap,
-                    view: view.clone(),
-                }
+            .children(self.slots.into_iter().map(move |slot| PhotoKey {
+                state: KeyState::of(slot.idx, selected, hovered),
+                shape: photo_key_shape(&slot.target, img_w),
+                render: (img_w, img_h),
+                slot,
+                view: view.clone(),
             }))
     }
 }
 
-/// Cap size on the render, as fractions of the image. Calibrated against
-/// the render those markers were measured on: a cap sits inside the key it
-/// marks, so the render's chassis gaps stay readable between caps. Grid
-/// keys occupy the larger face; the paging controls are printed shorter.
-fn overlay_cap(target: &KeyTarget, render: (f32, f32)) -> (f32, f32) {
-    let (w_frac, h_frac) = match target {
-        KeyTarget::Control(button) if button.cid().is_some_and(is_paging_cid) => {
-            (PAGING_CAP_W_FRAC, PAGING_CAP_H_FRAC)
-        }
-        _ => (GRID_CAP_W_FRAC, GRID_CAP_H_FRAC),
-    };
-    (w_frac * render.0, h_frac * render.1)
+/// Share of the face the glyph spans when the face also carries a caption.
+const LCD_GLYPH_FRAC: f32 = 0.38;
+/// Gap between a key's edge and its selection ring, in px.
+const PHOTO_RING_GAP: f32 = 3.;
+const PHOTO_RING_W: f32 = 2.;
+
+/// How a key on the render is drawn right now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyState {
+    Rest,
+    Hovered,
+    Selected,
 }
 
-const GRID_CAP_W_FRAC: f32 = 0.215;
-const GRID_CAP_H_FRAC: f32 = 0.155;
-const PAGING_CAP_W_FRAC: f32 = 0.225;
-const PAGING_CAP_H_FRAC: f32 = 0.115;
+impl KeyState {
+    fn of(idx: usize, selected: Option<usize>, hovered: Option<usize>) -> Self {
+        if selected == Some(idx) {
+            Self::Selected
+        } else if hovered == Some(idx) {
+            Self::Hovered
+        } else {
+            Self::Rest
+        }
+    }
+}
+
+/// One key mapped onto the keypad render: a selection ring around the
+/// physical key and, for an LCD grid key, the face the device shows.
+#[derive(IntoElement)]
+struct PhotoKey {
+    slot: KeySlot,
+    state: KeyState,
+    /// The key's outline on the render, in px.
+    shape: KeyShape,
+    /// The render's size, in px — what the slot's marker fractions scale by.
+    render: (f32, f32),
+    view: Entity<FunctionRowView>,
+}
+
+impl RenderOnce for PhotoKey {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let shape = self.shape;
+        let idx = self.slot.idx;
+        let state = self.state;
+        let outer = PHOTO_RING_GAP + PHOTO_RING_W;
+        let left = self.slot.x_frac * self.render.0 - shape.w / 2. - outer;
+        let top = self.slot.y_frac * self.render.1 - shape.h / 2. - outer;
+        let tooltip: SharedString = format!("{} · {}", self.slot.label, self.slot.binding).into();
+        let ring = match state {
+            KeyState::Selected => rgb(ACCENT_BLUE).into(),
+            KeyState::Hovered => hsla(0., 0., 1., 0.55),
+            KeyState::Rest => hsla(0., 0., 0., 0.),
+        };
+        let face = matches!(self.slot.target, KeyTarget::Grid(_))
+            .then(|| lcd_face(self.slot.lcd_icon, self.slot.binding.clone(), shape, state));
+        // The ring follows the key's own curve, one gap further out.
+        let [tl, tr, br, bl] = shape.radii.map(|r| px(r + outer));
+        let view_hover = self.view.clone();
+        let view_click = self.view;
+
+        div()
+            .id(("keypad-photo-key", idx))
+            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(shape.w + 2. * outer))
+            .h(px(shape.h + 2. * outer))
+            .p(px(PHOTO_RING_GAP))
+            .rounded_tl(tl)
+            .rounded_tr(tr)
+            .rounded_br(br)
+            .rounded_bl(bl)
+            .border(px(PHOTO_RING_W))
+            .border_color(ring)
+            .cursor_pointer()
+            .children(face)
+            .on_hover(move |hovered, _window, cx| {
+                let next = (*hovered).then_some(idx);
+                view_hover.update(cx, |v, vcx| v.set_hovered_key(next, vcx));
+            })
+            .on_click(move |_ev, _window, cx| {
+                view_click.update(cx, |v, vcx| v.click_key(idx, vcx));
+            })
+    }
+}
+
+/// An LCD grid key's face as the device shows it: the key's whole top in
+/// black, carrying the bound action's glyph in white (the same icon the agent
+/// writes to the key) with the action's name beneath, or blank when the key
+/// does nothing — a blank key offers a faint plus while it is hovered or
+/// selected.
+fn lcd_face(
+    icon: Option<&'static str>,
+    binding: SharedString,
+    key: KeyShape,
+    state: KeyState,
+) -> gpui::Div {
+    let glyph = key.w * LCD_GLYPH_FRAC;
+    let [tl, tr, br, bl] = key.radii.map(px);
+    let face = v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap(px(key.w * 0.06))
+        .rounded_tl(tl)
+        .rounded_tr(tr)
+        .rounded_br(br)
+        .rounded_bl(bl)
+        .bg(hsla(0., 0., 0., 1.))
+        .overflow_hidden();
+    match icon {
+        Some(icon) => face
+            .child(
+                svg()
+                    .path(icon)
+                    .size(px(glyph))
+                    .flex_none()
+                    .text_color(hsla(0., 0., 1., 1.)),
+            )
+            .child(
+                div()
+                    .max_w(px(key.w - 16.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_caption()
+                    .text_color(hsla(0., 0., 1., 0.72))
+                    .child(binding),
+            ),
+        None => face.when(state != KeyState::Rest, |face| {
+            face.child(
+                Icon::new(IconName::Plus)
+                    .size(px(glyph * 0.6))
+                    .text_color(hsla(0., 0., 1., 0.45)),
+            )
+        }),
+    }
+}
 
 /// The overlay render size: the portrait keypad render as tall as the
 /// viewport allows under the same reserve the keyboard path keeps, minus
