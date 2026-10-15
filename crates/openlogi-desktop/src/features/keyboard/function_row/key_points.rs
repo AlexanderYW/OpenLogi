@@ -231,11 +231,11 @@ fn keypad_layout(
     let mut slots: Vec<KeySlotLayout> = GridKey::ALL
         .iter()
         .map(|key| {
-            let (row, col) = key.position();
+            let position = key.position();
             KeySlotLayout {
                 legend: rust_i18n::t!(key.translation_key()).into_owned(),
                 target: KeyTarget::grid(*key),
-                point: grid_point(row, col),
+                point: grid_point(usize::from(position.row), usize::from(position.col)),
             }
         })
         .collect();
