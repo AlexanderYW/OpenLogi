@@ -30,7 +30,7 @@ use openlogi_device_registry::keypad::find_keypad;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use super::{HidppOperation, WriteError};
+use super::{HidppOperation, WriteError, classify_channel_error};
 use crate::keypad_vendor::{VendorFunction, input_payload, output_header};
 use crate::{DeviceRoute, SharedChannel};
 
@@ -112,12 +112,7 @@ pub async fn write_key_image_on(
         let written = channel
             .write_raw_report(packet)
             .await
-            .map_err(|error| match error {
-                hidpp::channel::ChannelError::Timeout => WriteError::RequestTimedOut {
-                    operation: HidppOperation::WriteKeyImage,
-                },
-                other => WriteError::Hidpp(format!("{other:?}")),
-            })?;
+            .map_err(|error| classify_channel_error(error, HidppOperation::WriteKeyImage))?;
         if written != packet.len() {
             return Err(WriteError::Hidpp(format!(
                 "key image report wrote {written} of {} bytes",

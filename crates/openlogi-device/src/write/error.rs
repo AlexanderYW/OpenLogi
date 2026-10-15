@@ -1,3 +1,4 @@
+use hidpp::channel::ChannelError;
 use hidpp::protocol::v20::{ErrorType, Hidpp20Error};
 
 // WriteError, HidppOperation, and HidppFeatureErrorKind are pure IPC wire
@@ -40,5 +41,15 @@ pub(crate) fn classify_hidpp_error(
         },
         Hidpp20Error::Channel(error) => WriteError::Hidpp(format!("{error:?}")),
         _ => WriteError::Hidpp(format!("{error:?}")),
+    }
+}
+
+/// A transport failure of `operation`: a timeout is
+/// [`WriteError::RequestTimedOut`], anything else an opaque
+/// [`WriteError::Hidpp`].
+pub(crate) fn classify_channel_error(error: ChannelError, operation: HidppOperation) -> WriteError {
+    match error {
+        ChannelError::Timeout => WriteError::RequestTimedOut { operation },
+        other => WriteError::Hidpp(format!("{other:?}")),
     }
 }
