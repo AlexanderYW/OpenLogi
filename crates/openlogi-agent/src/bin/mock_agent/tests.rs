@@ -274,6 +274,30 @@ async fn brightness_echoes_the_clamped_level_it_applied() {
     );
 }
 
+/// The mock writes what the real device layer would: a request for 0 —
+/// which resets the MX Keypad — lands on the lowest writable level instead.
+#[tokio::test]
+async fn brightness_never_applies_zero() {
+    let mut profile = built_in_profile().expect("built-in profile should construct");
+    profile.settings[0].brightness = ProfileSetting::Supported(BrightnessState {
+        level: 70,
+        min: 0,
+        max: 100,
+        steps: 101,
+    });
+    let agent = MockAgent::new(
+        State::new(profile, MockClock::Test(Duration::ZERO))
+            .expect("brightness profile should validate"),
+    );
+
+    let applied = agent
+        .set_brightness(tarpc::context::current(), mouse_route(), 0)
+        .await
+        .expect("a zero request clamps, not fails");
+
+    assert_eq!(applied.level, 1);
+}
+
 #[tokio::test]
 async fn brightness_on_a_device_without_the_feature_is_unsupported() {
     let agent = MockAgent::new(test_state());

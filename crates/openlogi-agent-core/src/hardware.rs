@@ -1104,9 +1104,12 @@ pub(crate) fn restore_brightness_in_background(op: DeviceOp, level: u16) {
         "brightness restore",
         move |c| async move { openlogi_hid::restore_brightness_on(&c, level).await },
         move |result| {
-            log_outcome(index, "brightness restore", result, |state| match state {
-                Some(state) => debug!(index, level, applied = state.level, "brightness restored"),
-                None => debug!(index, "device keeps its own brightness — restore skipped"),
+            log_outcome(index, "brightness restore", result, |state| {
+                if let Some(state) = state {
+                    debug!(index, level, applied = state.level, "brightness restored");
+                } else {
+                    debug!(index, "device keeps its own brightness — restore skipped");
+                }
             });
         },
     );
