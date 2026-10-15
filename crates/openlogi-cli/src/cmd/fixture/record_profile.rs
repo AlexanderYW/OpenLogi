@@ -282,16 +282,10 @@ async fn capture_hidpp_settings(
         )
     })?;
 
-    let dpi = match capability_setting(device.online, capabilities.pointer) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "DPI",
-                agent::call(client.read_dpi(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
+    let dpi = gated_read(device.online, capabilities.pointer, "DPI", || {
+        agent::call(client.read_dpi(context::current(), source_route.clone()))
+    })
+    .await?;
     let smartshift = if device.online {
         semantic_read(
             "SmartShift",
@@ -301,73 +295,41 @@ async fn capture_hidpp_settings(
     } else {
         return Err(unknown_offline_support("SmartShift"));
     };
-    let wheel = match capability_setting(device.online, capabilities.hires_wheel) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "wheel",
-                agent::call(client.read_wheel(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
-    let backlight = match capability_setting(device.online, capabilities.backlight) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "backlight",
-                agent::call(client.read_backlight(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
+    let wheel = gated_read(device.online, capabilities.hires_wheel, "wheel", || {
+        agent::call(client.read_wheel(context::current(), source_route.clone()))
+    })
+    .await?;
+    let backlight = gated_read(device.online, capabilities.backlight, "backlight", || {
+        agent::call(client.read_backlight(context::current(), source_route.clone()))
+    })
+    .await?;
 
-    let fn_lock = match capability_setting(device.online, capabilities.fn_lock) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "fn-lock",
-                agent::call(client.read_fn_lock(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
-    let report_rate = match capability_setting(device.online, capabilities.report_rate) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "report-rate",
-                agent::call(client.read_report_rate(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
-    let mut easy_switch = match capability_setting(device.online, capabilities.easy_switch) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "Easy-Switch",
-                agent::call(
-                    client.read_easy_switch_hosts(context::current(), source_route.clone()),
-                ),
-            )
-            .await?
-        }
-    };
+    let fn_lock = gated_read(device.online, capabilities.fn_lock, "fn-lock", || {
+        agent::call(client.read_fn_lock(context::current(), source_route.clone()))
+    })
+    .await?;
+    let report_rate = gated_read(
+        device.online,
+        capabilities.report_rate,
+        "report-rate",
+        || agent::call(client.read_report_rate(context::current(), source_route.clone())),
+    )
+    .await?;
+    let mut easy_switch = gated_read(
+        device.online,
+        capabilities.easy_switch,
+        "Easy-Switch",
+        || agent::call(client.read_easy_switch_hosts(context::current(), source_route.clone())),
+    )
+    .await?;
     if let Some(hosts) = easy_switch.value_mut() {
         sanitize::easy_switch_hosts(hosts);
     }
 
-    let brightness = match capability_setting(device.online, capabilities.brightness) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "brightness",
-                agent::call(client.read_brightness(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
+    let brightness = gated_read(device.online, capabilities.brightness, "brightness", || {
+        agent::call(client.read_brightness(context::current(), source_route.clone()))
+    })
+    .await?;
 
     Ok(ProfileDeviceSettings {
         route: profile_route,
@@ -382,6 +344,23 @@ async fn capture_hidpp_settings(
         lighting: profile_support(capabilities.lighting),
         light: ProfileSupport::Unsupported,
     })
+}
+
+/// `family`'s setting: settled from the capability facts when they already
+/// answer it ([`capability_setting`]), else read from the online device.
+async fn gated_read<T, F>(
+    online: bool,
+    supported: bool,
+    family: &'static str,
+    call: impl FnOnce() -> F,
+) -> Result<ProfileSetting<T>>
+where
+    F: Future<Output = Result<Result<T, WriteError>, CallFailure>>,
+{
+    match capability_setting(online, supported) {
+        Some(setting) => Ok(setting),
+        None => semantic_read(family, call()).await,
+    }
 }
 
 fn capability_setting<T>(online: bool, supported: bool) -> Option<ProfileSetting<T>> {
