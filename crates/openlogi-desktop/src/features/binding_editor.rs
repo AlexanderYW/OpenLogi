@@ -77,8 +77,8 @@ pub(crate) fn action_icon_path(action: &Action) -> &'static str {
         Action::NewTab => "action-icons/square-plus.svg",
         Action::CloseTab => "action-icons/square-x.svg",
         Action::ReopenTab => "action-icons/rotate-ccw.svg",
-        Action::NextTab => "action-icons/chevron-right.svg",
-        Action::PrevTab => "action-icons/chevron-left.svg",
+        Action::NextTab | Action::NextKeypadPage => "action-icons/chevron-right.svg",
+        Action::PrevTab | Action::PreviousKeypadPage => "action-icons/chevron-left.svg",
         Action::ReloadPage => "action-icons/rotate-cw.svg",
         Action::MissionControl | Action::ShowActionsRing => "action-icons/layout-grid.svg",
         Action::AppExpose => "action-icons/layers.svg",
@@ -99,8 +99,6 @@ pub(crate) fn action_icon_path(action: &Action) -> &'static str {
             "action-icons/gauge.svg"
         }
         Action::ToggleSmartShift => "action-icons/refresh-cw.svg",
-        Action::PreviousKeypadPage => "action-icons/chevron-left.svg",
-        Action::NextKeypadPage => "action-icons/chevron-right.svg",
         Action::ScrollUp => "action-icons/chevrons-up.svg",
         Action::ScrollDown => "action-icons/chevrons-down.svg",
         Action::HorizontalScrollLeft => "action-icons/chevrons-left.svg",
