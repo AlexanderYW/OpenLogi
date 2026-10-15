@@ -1,0 +1,17 @@
+# Owner: openlogi_core::device::DeviceKind::is_keyboard_family — which kinds
+# bind keys on the keyboard plane rather than pointer buttons.
+id: core-keyboard-family-owner
+language: rust
+severity: error
+message: DeviceKind::is_keyboard_family() (openlogi-core device.rs) decides which kinds are keyboard-like; call it instead of matching Keyboard | Numpad here.
+note: |
+  The Keys-tab gate, the agent's keyboard capture filter, and its app-context
+  choice each matched `Keyboard | Numpad`, so a new keyed kind would have had
+  to be added at every site. See "Single source of truth" in AGENTS.md.
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/openlogi-core/src/device.rs
+rule:
+  kind: macro_invocation
+  regex: '^matches!\s*\(.*DeviceKind::(Keyboard|Numpad)\s*\|\s*DeviceKind::(Keyboard|Numpad)'

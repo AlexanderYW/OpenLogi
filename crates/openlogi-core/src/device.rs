@@ -63,6 +63,15 @@ pub enum DeviceKind {
 }
 
 impl DeviceKind {
+    /// Whether this kind binds keys, not pointer buttons: keyboards and
+    /// standalone numpads. Such a device gets the Keys panel, its bindings
+    /// resolve against the foreground app rather than the app under the
+    /// pointer, and the agent captures it on the keyboard input plane.
+    #[must_use]
+    pub const fn is_keyboard_family(self) -> bool {
+        matches!(self, Self::Keyboard | Self::Numpad)
+    }
+
     /// Parse the OpenLogi asset registry's `type` string into a [`DeviceKind`].
     ///
     /// The registry field is free-form and case-inconsistent (both `"mouse"`
@@ -1022,6 +1031,19 @@ mod tests {
             "min = 2700\nmax = 6500\nstep = 0\nunit = 'kelvin'\n",
         );
         result.expect_err("a zero step must not survive deserialization");
+    }
+
+    #[test]
+    fn only_keyboards_and_numpads_are_keyboard_family() {
+        assert!(DeviceKind::Keyboard.is_keyboard_family());
+        assert!(DeviceKind::Numpad.is_keyboard_family());
+        for kind in [
+            DeviceKind::Mouse,
+            DeviceKind::Trackball,
+            DeviceKind::Unknown,
+        ] {
+            assert!(!kind.is_keyboard_family(), "{kind:?}");
+        }
     }
 
     #[test]
