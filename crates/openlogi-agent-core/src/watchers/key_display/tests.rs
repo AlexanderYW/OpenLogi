@@ -150,3 +150,30 @@ fn identical_faces_render_once() {
         &tiles.get(KeyFace::Blank, 118).unwrap()
     ));
 }
+
+#[test]
+fn a_keypad_that_keeps_failing_is_reported_once_until_it_recovers() {
+    let mut failing = Failing::default();
+    let pad = keypad(0xc354);
+
+    assert!(failing.failed(&pad));
+    assert!(!failing.failed(&pad));
+    // Another keypad's first failure is its own.
+    assert!(failing.failed(&keypad(0xc355)));
+
+    failing.succeeded(&pad);
+    assert!(failing.failed(&pad));
+}
+
+#[test]
+fn a_keypad_that_leaves_and_returns_is_reported_afresh() {
+    let mut failing = Failing::default();
+    let pad = keypad(0xc354);
+    assert!(failing.failed(&pad));
+
+    failing.retain(&[spec(pad.clone(), 0, &[])]);
+    assert!(!failing.failed(&pad));
+
+    failing.retain(&[]);
+    assert!(failing.failed(&pad));
+}
