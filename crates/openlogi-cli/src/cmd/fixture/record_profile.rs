@@ -333,16 +333,10 @@ async fn capture_hidpp_settings(
     )
     .await?;
 
-    let brightness = match capability_setting(device.online, capabilities.brightness) {
-        Some(setting) => setting,
-        None => {
-            semantic_read(
-                "brightness",
-                agent::call(client.read_brightness(context::current(), source_route.clone())),
-            )
-            .await?
-        }
-    };
+    let brightness = gated_read("brightness", device.online, capabilities.brightness, || {
+        agent::call(client.read_brightness(context::current(), source_route.clone()))
+    })
+    .await?;
 
     Ok(ProfileDeviceSettings {
         route: profile_route,
