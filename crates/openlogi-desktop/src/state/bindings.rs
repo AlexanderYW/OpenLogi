@@ -202,6 +202,15 @@ impl AppState {
             .map_or(KeypadPage::FIRST, |key| self.config.keypad_pages(key))
     }
 
+    /// Whether the selected keypad binds any key on `page` in any profile —
+    /// what removing that page would drop.
+    #[must_use]
+    pub fn current_keypad_page_binds(&self, page: KeypadPage) -> bool {
+        self.current_record()
+            .and_then(DeviceRecord::persistent_config_key)
+            .is_some_and(|key| self.config.keypad_page_binds(key, page))
+    }
+
     /// Give the selected keypad pages `1..=last`, persist it, and have the
     /// agent reload. Shrinking drops the removed pages' grid bindings (see
     /// [`Config::set_keypad_pages`]); the binding projection is refreshed so

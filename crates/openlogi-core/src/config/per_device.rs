@@ -13,7 +13,8 @@ use super::{
     ThumbwheelSensitivity,
 };
 use crate::binding::{
-    ActionRingConfig, ActionRingIcon, ActionRingSlot, Binding, ButtonId, KeypadPage, RingAction,
+    Action, ActionRingConfig, ActionRingIcon, ActionRingSlot, Binding, ButtonId, KeypadPage,
+    RingAction,
 };
 use crate::hid::{Dpi, ReportRate};
 
@@ -429,6 +430,26 @@ impl Config {
         for overlay in device.per_app_bindings.values_mut() {
             overlay.retain(|button, _| kept(button));
         }
+    }
+
+    /// Whether any grid key on `page` of `device_key` is bound — device-wide
+    /// or in any per-app overlay — i.e. whether shrinking past `page`
+    /// ([`Self::set_keypad_pages`]) would drop a binding.
+    #[must_use]
+    pub fn keypad_page_binds(&self, device_key: &str, page: KeypadPage) -> bool {
+        let Some(device) = self.devices.get(device_key) else {
+            return false;
+        };
+        let on_page = |button: &ButtonId| button.grid_slot().is_some_and(|slot| slot.page == page);
+        device
+            .bindings
+            .iter()
+            .any(|(button, binding)| on_page(button) && *binding != Binding::Single(Action::None))
+            || device
+                .per_app_bindings
+                .values()
+                .flatten()
+                .any(|(button, action)| on_page(button) && *action != Action::None)
     }
 
     /// The effective thumb-wheel sensitivity for `device_key`: the device's

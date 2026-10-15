@@ -185,11 +185,8 @@ impl FunctionRowView {
         }
         let last = state.map_or(KeypadPage::FIRST, AppState::current_keypad_pages);
         self.keypad_page = self.keypad_page.min(last);
-        let last_bound = state.is_some_and(|state| {
-            state.button_bindings().iter().any(|(button, action)| {
-                button.grid_slot().is_some_and(|slot| slot.page == last) && *action != Action::None
-            })
-        });
+        // Every profile's keys, not just the open one's: removal drops them all.
+        let last_bound = state.is_some_and(|state| state.current_keypad_page_binds(last));
         (last, last_bound)
     }
 

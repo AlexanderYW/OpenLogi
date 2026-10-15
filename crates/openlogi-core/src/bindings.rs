@@ -546,4 +546,32 @@ mod tests {
         assert!(!device.bindings.contains_key(&slot(3, GridKey::Middle)));
         assert!(device.per_app_bindings["app"].is_empty());
     }
+
+    /// A page binds keys when any profile binds one there — an app profile's
+    /// key alone is enough, since shrinking drops it too.
+    #[test]
+    fn a_page_binds_keys_through_any_profile() {
+        use crate::binding::GridKey;
+        let page = |number| KeypadPage::new(number).unwrap();
+        let mut cfg = Config::default();
+        cfg.set_keypad_pages("keypad", page(3));
+        assert!(!cfg.keypad_page_binds("keypad", page(2)));
+        assert!(!cfg.keypad_page_binds("unknown", page(1)));
+
+        cfg.set_binding(
+            "keypad",
+            slot(2, GridKey::Middle),
+            Binding::Single(Action::Copy),
+        );
+        cfg.set_per_app_binding(
+            "keypad",
+            "app",
+            slot(3, GridKey::TopLeft),
+            Some(Action::Cut),
+        );
+
+        assert!(cfg.keypad_page_binds("keypad", page(2)));
+        assert!(cfg.keypad_page_binds("keypad", page(3)));
+        assert!(!cfg.keypad_page_binds("keypad", page(1)));
+    }
 }
