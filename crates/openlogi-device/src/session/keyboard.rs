@@ -14,8 +14,8 @@
 //! them the device's own `0x1b04` table reports as divertable, so a key
 //! OpenLogi has no catalog row for is captured exactly like a known one.
 //!
-//! A keypad's grid keys join the same session through the raw-report path
-//! ([`ArmedCapture::raw_report_handler`]): the MX Creative Keypad reports them
+//! A keypad's grid keys join the same session through the channel's raw-report
+//! listener: the MX Creative Keypad reports them
 //! on a vendor report sharing its HID++ node, which never parses as a message,
 //! so they cannot ride diversion. They are observed, never armed — the session
 //! writes nothing on their behalf, and only the indices named in
