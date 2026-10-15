@@ -72,9 +72,9 @@ fn a_keypad_without_markers_gets_keycaps_not_the_global_f_row() {
             .any(|slot| matches!(slot.target, KeyTarget::FunctionKey(_))),
         "no keypad key binds to the global keyboard plane"
     );
-    assert_eq!(slots[0].target, KeyTarget::Grid(GridKey::TopLeft));
+    assert_eq!(slots[0].target, KeyTarget::grid(GridKey::TopLeft));
     assert_eq!(slots[0].legend, "Grid Key (Top Left)");
-    assert_eq!(slots[4].target, KeyTarget::Grid(GridKey::Middle));
+    assert_eq!(slots[4].target, KeyTarget::grid(GridKey::Middle));
     assert_eq!(slots[4].legend, "Grid Key (Middle)");
     assert_eq!(
         slots[9].target,
@@ -153,12 +153,12 @@ fn grid_markers_put_the_keypad_caps_on_the_photo() {
             .any(|slot| matches!(slot.target, KeyTarget::FunctionKey(_))),
         "a keypad binds its own keys, never the global F-row"
     );
-    assert_eq!(slots[0].target, KeyTarget::Grid(GridKey::TopLeft));
+    assert_eq!(slots[0].target, KeyTarget::grid(GridKey::TopLeft));
     assert_eq!(slots[0].legend, "Grid Key (Top Left)");
     assert_approx_eq(slots[0].point.x_frac, 24.92 / 100.);
     assert_approx_eq(slots[0].point.y_frac, 20.77 / 100.);
-    assert_eq!(slots[4].target, KeyTarget::Grid(GridKey::Middle));
-    assert_eq!(slots[8].target, KeyTarget::Grid(GridKey::BottomRight));
+    assert_eq!(slots[4].target, KeyTarget::grid(GridKey::Middle));
+    assert_eq!(slots[8].target, KeyTarget::grid(GridKey::BottomRight));
     assert_eq!(
         slots[9].target,
         KeyTarget::Control(ButtonId::control(0x01a1)),
@@ -574,5 +574,34 @@ fn assert_approx_eq(actual: f32, expected: f32) {
     assert!(
         (actual - expected).abs() < 0.0001,
         "expected {expected}, got {actual}"
+    );
+}
+
+/// The view edits grid keys on its chosen page by moving their targets there;
+/// the paging buttons and F-row keys have no pages and stay as they are.
+#[test]
+fn only_grid_targets_move_to_the_edited_page() {
+    use openlogi_core::binding::{GridSlot, KeypadPage};
+    let second = KeypadPage::new(2).unwrap();
+
+    assert_eq!(
+        KeyTarget::grid(GridKey::Middle).on_page(second),
+        KeyTarget::Grid(GridSlot {
+            page: second,
+            key: GridKey::Middle,
+        })
+    );
+    let paging = KeyTarget::Control(ButtonId::Control(Cid::RIGHT_PAGING));
+    assert_eq!(paging.clone().on_page(second), paging);
+    // Every keypad layout slot starts on page 1, whatever page is edited.
+    let keypad = key_surface(None, DeviceKind::Numpad).slots();
+    assert!(
+        keypad
+            .iter()
+            .filter_map(|slot| match &slot.target {
+                KeyTarget::Grid(grid) => Some(grid.page),
+                _ => None,
+            })
+            .all(|page| page == KeypadPage::FIRST)
     );
 }

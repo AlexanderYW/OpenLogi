@@ -55,6 +55,7 @@ mod device_names;
 mod dpi;
 mod easy_switch;
 mod fn_lock;
+mod keypad_pages;
 mod lighting;
 mod os_layout;
 mod profile_scope;

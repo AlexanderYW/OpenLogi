@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 
-use openlogi_core::binding::{ButtonId, Cid, GridKey};
+use openlogi_core::binding::{ButtonId, Cid, GridKey, GridSlot, KeypadPage};
 use openlogi_core::config::{FunctionKey, KeyModifiers, KeyTrigger};
 use openlogi_core::device::DeviceKind;
 
@@ -55,21 +55,40 @@ pub(crate) enum KeyTarget {
     /// A HID++ control of the selected keyboard, bound per device and
     /// diverted by the agent while bound.
     Control(ButtonId),
-    /// A keypad grid key, bound per device like a control but identified by
-    /// its position: the vendor report that carries its presses names no
-    /// control.
-    Grid(GridKey),
+    /// A keypad grid key on one binding page, bound per device like a control
+    /// but identified by its position: the vendor report that carries its
+    /// presses names no control. Layouts place page-1 slots; the view moves
+    /// them to the page it is editing ([`Self::on_page`]).
+    Grid(GridSlot),
     /// An OS-hook F-row trigger, bound globally across keyboards.
     FunctionKey(KeyTrigger),
 }
 
 impl KeyTarget {
+    /// The first-page target for grid key `key`.
+    pub(crate) const fn grid(key: GridKey) -> Self {
+        Self::Grid(GridSlot {
+            page: KeypadPage::FIRST,
+            key,
+        })
+    }
+
+    /// This target as the view edits it on `page`: a grid key moves to that
+    /// page's slot; every other target has no pages and stays as it is.
+    #[must_use]
+    pub(crate) fn on_page(self, page: KeypadPage) -> Self {
+        match self {
+            Self::Grid(slot) => Self::Grid(GridSlot { page, ..slot }),
+            other => other,
+        }
+    }
+
     /// The key's legend: a control's or grid key's localized catalog name,
     /// or the F-row trigger as it is written in `config.toml`.
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Control(button) => control_legend(*button),
-            Self::Grid(key) => rust_i18n::t!(key.translation_key()).into_owned(),
+            Self::Grid(slot) => rust_i18n::t!(slot.key.translation_key()).into_owned(),
             Self::FunctionKey(trigger) => trigger.to_string(),
         }
     }
@@ -161,16 +180,13 @@ pub(super) const KEYCAP_H: f32 = 64.;
 pub(super) const KEYCAP_PAGING_H: f32 = 40.;
 pub(super) const KEYCAP_GAP: f32 = 12.;
 
-/// The keypad's two paging controls, left then right: the CIDs OpenLogi
-/// catalogs for its paging feature — the keys printed `‹` and `›`.
-pub(super) const PAGING_CIDS: [u16; 2] = [0x01a1, 0x01a2];
-
-/// Whether `cid` marks one of those paging keys. A marked keypad's depot
+/// Whether `cid` marks one of the keypad's paging keys ([`Cid::PAGING`],
+/// printed `‹` and `›`). A marked keypad's depot
 /// may address them beside the grid like any other control; the schematic
 /// draws them as the lower caps they physically are.
 #[must_use]
 pub(super) fn is_paging_cid(cid: Cid) -> bool {
-    PAGING_CIDS.contains(&cid.raw())
+    Cid::PAGING.contains(&cid)
 }
 
 /// The canvas keycap points are fractions of: three columns, three grid
@@ -212,13 +228,13 @@ fn keypad_slots() -> Vec<KeySlotLayout> {
             let (row, col) = key.position();
             KeySlotLayout {
                 legend: rust_i18n::t!(key.translation_key()).into_owned(),
-                target: KeyTarget::Grid(*key),
+                target: KeyTarget::grid(*key),
                 point: keycap_point(col, row),
             }
         })
         .collect();
-    for (col, cid) in PAGING_CIDS.into_iter().enumerate() {
-        let button = ButtonId::control(cid);
+    for (col, cid) in Cid::PAGING.into_iter().enumerate() {
+        let button = ButtonId::Control(cid);
         slots.push(KeySlotLayout {
             legend: control_legend(button),
             target: KeyTarget::Control(button),
@@ -271,7 +287,7 @@ fn marker_slots(asset: &ResolvedAsset, kind: DeviceKind) -> Vec<KeySlotLayout> {
                 let key = GridKey::from_index(assignment.grid_index()?)?;
                 seen_grid
                     .insert(key.index())
-                    .then_some(KeyTarget::Grid(key))?
+                    .then_some(KeyTarget::grid(key))?
             };
             let raw = KeyPoint {
                 x_frac: assignment.marker.x / 100.0,
