@@ -34,6 +34,8 @@ use openlogi_core::binding::ButtonId;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use crate::keypad_vendor::{VendorFunction, input_payload};
+
 use super::capture::{
     ArmedCapture, CaptureHost, Liveness, ReportingChangeStream, open_device, run_capture,
     subscribe_reporting_changes,
@@ -177,10 +179,14 @@ fn emit_button_edges(
     }
 }
 
+/// Marks a grid-key frame's payload as the held-id list.
+const GRID_ID_LIST: u8 = 0x01;
+
 /// Decode one keypad grid-key vendor PDU into the ids it reports held.
 ///
 /// The MX Creative Keypad's framing, hardware-verified 2026-10: a 32-byte
-/// report `13 ff 02 00 [seq] 01 [id, …]` whose NUL-terminated payload lists
+/// report `13 ff 02 00 [seq] 01 [id, …]` (channel framing owned by
+/// [`crate::keypad_vendor`]) whose NUL-terminated payload lists
 /// every grid key held *now* — a press names the key, the release that
 /// follows names none, and a chord names every held key in one frame. `seq`
 /// is a rolling counter (`c0`…`cf` on a live capture) that carries no edge
@@ -191,16 +197,12 @@ fn emit_button_edges(
 /// index table itself is owned by [`openlogi_core::binding::GridKey`], so
 /// this decodes a frame, not identity.
 fn grid_key_frame(bytes: &[u8]) -> Option<impl Iterator<Item = u8> + '_> {
-    if bytes.len() >= 7
-        && bytes[0] == 0x13
-        && bytes[1] == 0xff
-        && bytes[2] == 0x02
-        && bytes[3] == 0x00
-        && bytes[5] == 0x01
-    {
-        return Some(bytes[6..].iter().copied().take_while(|id| *id != 0));
+    match input_payload(bytes, VendorFunction::GridKeys)? {
+        [_seq, GRID_ID_LIST, ids @ ..] if !ids.is_empty() => {
+            Some(ids.iter().copied().take_while(|id| *id != 0))
+        }
+        _ => None,
     }
-    None
 }
 
 /// Diff one grid-key vendor frame's held set against `down` into edges: a

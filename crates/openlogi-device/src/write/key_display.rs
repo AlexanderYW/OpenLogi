@@ -31,15 +31,11 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use super::{HidppOperation, WriteError};
+use crate::keypad_vendor::{VendorFunction, input_payload, output_header};
 use crate::{DeviceRoute, SharedChannel};
 
-/// Report ID of the vendor image write.
-const IMAGE_REPORT_ID: u8 = 0x14;
-/// Report ID the device answers vendor-channel traffic on.
-const VENDOR_INPUT_REPORT_ID: u8 = 0x13;
-/// The vendor channel and the image-write function, bytes 1–3 of both the
-/// write and its acknowledgement.
-const IMAGE_CHANNEL: [u8; 3] = [0xff, 0x02, 0x2b];
+/// Bytes 0–3 of every image packet.
+const IMAGE_HEADER: [u8; 4] = output_header(VendorFunction::Image);
 /// Every image packet is a full-width report.
 const PACKET_LEN: usize = 4095;
 const FIRST_HEADER_LEN: usize = 20;
@@ -147,7 +143,7 @@ pub async fn write_key_image_on(
 
 /// Whether `report` acknowledges an image write.
 fn is_image_ack(report: &[u8]) -> bool {
-    report.first() == Some(&VENDOR_INPUT_REPORT_ID) && report.get(1..4) == Some(&IMAGE_CHANNEL)
+    input_payload(report, VendorFunction::Image).is_some()
 }
 
 fn part_byte(index: u8, first: bool, last: bool) -> u8 {
@@ -162,13 +158,8 @@ fn part_byte(index: u8, first: bool, last: bool) -> u8 {
 }
 
 fn packet_header(part: u8) -> [u8; 5] {
-    [
-        IMAGE_REPORT_ID,
-        IMAGE_CHANNEL[0],
-        IMAGE_CHANNEL[1],
-        IMAGE_CHANNEL[2],
-        part,
-    ]
+    let [id, channel_hi, channel_lo, function] = IMAGE_HEADER;
+    [id, channel_hi, channel_lo, function, part]
 }
 
 /// Split `image` into the vendor write's packets for a `size`-square tile at

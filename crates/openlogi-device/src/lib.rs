@@ -18,6 +18,7 @@
 
 mod channel;
 mod device_io;
+mod keypad_vendor;
 
 pub mod backend;
 pub mod backlight;
