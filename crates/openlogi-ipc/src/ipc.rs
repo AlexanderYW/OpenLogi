@@ -105,7 +105,9 @@ pub use succession::Identity;
 /// v37: `Capabilities::virtual_thumbwheel` appended — Back/Forward can hold
 ///      the main wheel as a virtual thumb wheel; `AgentSnapshot::lights`
 ///      appended — what each standalone light reached over HID++ `0x1990`
-///      reads back, and the settings changed on the light itself.
+///      reads back, and the settings changed on the light itself;
+///      `Capabilities::{brightness,
+///      creative_keypad}` appended — the `0x8040` device brightness.
 pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Environment variable through which the agent hands a supervised helper the

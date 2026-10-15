@@ -167,6 +167,16 @@ pub struct Capabilities {
     /// persisted identity.
     #[serde(default)]
     pub virtual_thumbwheel: bool,
+    /// Device brightness (display illumination) — HID++ `0x8040`. Read as a
+    /// default when absent, so this branch can read the dev config written by
+    /// the creative-keypad worktree; serialized on this branch's (renumbered)
+    /// wire, kept as `false` for devices that do not report `0x8040`.
+    #[serde(default)]
+    pub brightness: bool,
+    /// Marker set by the MX Creative Console family probe; read with its
+    /// default for the same config-compatibility reason as `brightness`.
+    #[serde(default)]
+    pub creative_keypad: bool,
 }
 
 impl Capabilities {
@@ -201,6 +211,9 @@ impl Capabilities {
             // Set by the `0x1b04` control walk; the feature table alone
             // cannot say which controls report raw wheel.
             virtual_thumbwheel: false,
+            brightness: ids.contains(&0x8040),
+            // Filled by the device layer's control-table walk, never here.
+            creative_keypad: false,
         }
     }
 
@@ -598,6 +611,8 @@ mod tests {
                     backlight: false,
                     easy_switch: false,
                     virtual_thumbwheel: false,
+                    brightness: false,
+                    creative_keypad: false,
                 }),
                 settings_revision: 0,
             }],
@@ -716,6 +731,8 @@ mod tests {
                 backlight: false,
                 easy_switch: false,
                 virtual_thumbwheel: false,
+                brightness: false,
+                creative_keypad: false,
             }
         );
         assert!(!Capabilities::from_feature_ids(&[0x0003, 0x1b04]).thumbwheel);
@@ -739,6 +756,8 @@ mod tests {
                 backlight: false,
                 easy_switch: false,
                 virtual_thumbwheel: false,
+                brightness: false,
+                creative_keypad: false,
             }
         );
         // No driving features → nothing offered.
