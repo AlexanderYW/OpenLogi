@@ -68,7 +68,7 @@ pub(crate) use key_points::KeyTarget;
 #[cfg(test)]
 use key_points::{EVEN_SPACING_END, EVEN_SPACING_START, key_x_fractions};
 use key_points::{KeySurface, key_surface, keypad_canvas};
-use keypad::{KeypadPane, KeypadPhotoPane, keypad_page_bar, keypad_photo_render_size};
+use keypad::{KeypadPane, KeypadPhotoPane, LastPage, keypad_page_bar, keypad_photo_render_size};
 
 /// Width of the config panel (CSS px) when a key is selected.
 const PANEL_W: f32 = 320.;
@@ -167,7 +167,7 @@ impl FunctionRowView {
     /// Keep the edited page on the selected device's pages — page 1 on a new
     /// device, clamped when pages were removed — and answer the device's last
     /// page and whether removing it would drop bindings (so removal asks).
-    fn sync_keypad_page(&mut self, state: Option<&AppState>) -> (KeypadPage, bool) {
+    fn sync_keypad_page(&mut self, state: Option<&AppState>) -> LastPage {
         let record_key = state
             .and_then(AppState::current_record)
             .map(DeviceRecord::device_key);
@@ -178,8 +178,11 @@ impl FunctionRowView {
         let last = state.map_or(KeypadPage::FIRST, AppState::current_keypad_pages);
         self.keypad_page = self.keypad_page.min(last);
         // Every profile's keys, not just the open one's: removal drops them all.
-        let last_bound = state.is_some_and(|state| state.current_keypad_page_binds(last));
-        (last, last_bound)
+        let binds_keys = state.is_some_and(|state| state.current_keypad_page_binds(last));
+        LastPage {
+            page: last,
+            binds_keys,
+        }
     }
 
     /// Edit the grid keys on `page`.
@@ -278,7 +281,7 @@ impl Render for FunctionRowView {
         } else {
             keyboard_render_size(asset, viewport_h)
         };
-        let (last_page, last_page_bound) = self.sync_keypad_page(state);
+        let last_page = self.sync_keypad_page(state);
         let pal = theme::palette(cx);
         let slots = key_slots_from_layouts(surface, state, self.keypad_page);
 
@@ -344,7 +347,7 @@ impl Render for FunctionRowView {
         };
         let panel = selected.map(|selected| self.config_panel(selected, &slots, &view, cx));
         let page_bar = (keypad || keypad_photo)
-            .then(|| keypad_page_bar(self.keypad_page, last_page, last_page_bound, &view, &pal));
+            .then(|| keypad_page_bar(self.keypad_page, last_page, &view, &pal));
 
         // The whole row animates as one: when a key is selected the right-side
         // panel grows in and the keyboard nudges left to make room.
