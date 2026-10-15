@@ -805,7 +805,12 @@ async fn read_loop(
                     ChannelObservation::MalformedIncomingReport { report }
                 }
             });
-            trace!(len, foreign, "report not HID++ — dropped");
+            trace!(
+                len,
+                foreign,
+                payload = format_args!("{:02x?}", &buf[..len.min(16)]),
+                "report not HID++ — dropped"
+            );
             continue;
         };
 
