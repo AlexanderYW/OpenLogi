@@ -114,7 +114,7 @@ fn key_image_jpeg_rejects_what_the_length_field_cannot_declare() {
 fn only_a_wired_keypad_with_display_keys_has_a_key_display() {
     assert_eq!(
         key_display_for(&KEYPAD),
-        find_keypad(0x046d, 0xc354).and_then(|keypad| keypad.key_display)
+        find_keypad(0x046d, 0xc354).map(|keypad| keypad.key_display)
     );
     assert!(
         key_display_for(&DeviceRoute::Direct {
