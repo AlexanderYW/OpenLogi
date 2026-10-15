@@ -339,12 +339,12 @@ fn grid_only_bindings_publish_their_index_set() {
     let mut config = Config::default();
     config.set_binding(
         "keypad",
-        ButtonId::Grid(GridKey::Middle),
+        ButtonId::grid(GridKey::Middle),
         Binding::Single(Action::Screenshot),
     );
     config.set_binding(
         "keypad",
-        ButtonId::Grid(GridKey::BottomRight),
+        ButtonId::grid(GridKey::BottomRight),
         Binding::Single(Action::None),
     );
     let mut orch = orchestrator(config);
@@ -358,7 +358,7 @@ fn grid_only_bindings_publish_their_index_set() {
     assert_eq!(
         spec.grid,
         // `Middle` is the vendor report's index 5.
-        BTreeMap::from([(5, ButtonId::Grid(GridKey::Middle))])
+        BTreeMap::from([(5, ButtonId::grid(GridKey::Middle))])
     );
     assert!(spec.wanted.is_empty(), "grid keys divert nothing");
 }
@@ -507,12 +507,12 @@ fn keypad_key_faces_follow_the_bound_actions() {
     let mut config = Config::default();
     config.set_binding(
         "keypad",
-        ButtonId::Grid(GridKey::Middle),
+        ButtonId::grid(GridKey::Middle),
         Binding::Single(Action::Copy),
     );
     config.set_binding(
         "keypad",
-        ButtonId::Grid(GridKey::BottomRight),
+        ButtonId::grid(GridKey::BottomRight),
         Binding::Single(Action::None),
     );
     let mut orch = orchestrator(config);
@@ -540,7 +540,7 @@ fn key_display_specs_need_a_present_enabled_display_keypad() {
     let mut config = Config::default();
     config.set_binding(
         "other",
-        ButtonId::Grid(GridKey::Middle),
+        ButtonId::grid(GridKey::Middle),
         Binding::Single(Action::Copy),
     );
     let mut orch = orchestrator(config);
@@ -569,4 +569,136 @@ fn key_display_specs_carry_the_rearm_generation() {
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     assert_eq!(orch.key_display_specs_for()[0].generation, before + 1);
+}
+
+fn page(number: u8) -> openlogi_core::binding::KeypadPage {
+    openlogi_core::binding::KeypadPage::new(number).expect("a valid page")
+}
+
+fn on_page(number: u8, key: GridKey) -> ButtonId {
+    ButtonId::Grid(openlogi_core::binding::GridSlot {
+        page: page(number),
+        key,
+    })
+}
+
+/// A two-page keypad: Copy on page 1's middle key, Paste on page 2's middle
+/// and Undo on page 2's top-left.
+fn paged_keypad() -> Orchestrator {
+    let mut config = Config::default();
+    config.set_keypad_pages("keypad", page(2));
+    config.set_binding(
+        "keypad",
+        on_page(1, GridKey::Middle),
+        Binding::Single(Action::Copy),
+    );
+    config.set_binding(
+        "keypad",
+        on_page(2, GridKey::Middle),
+        Binding::Single(Action::Paste),
+    );
+    config.set_binding(
+        "keypad",
+        on_page(2, GridKey::TopLeft),
+        Binding::Single(Action::Undo),
+    );
+    let mut orch = orchestrator(config);
+    orch.devices = vec![wired_keypad("keypad", true)];
+    orch
+}
+
+/// The capture session observes every key bound on any page, so turning the
+/// page swaps only what a press dispatches — the capture identity, and with
+/// it the running session, stays put.
+#[test]
+fn a_page_turn_swaps_dispatch_without_changing_the_observed_keys() {
+    use crate::runtime::PageTurn;
+    let mut orch = paged_keypad();
+
+    let first = orch.keyboard_spec_for().expect("bound keys publish a spec");
+    assert_eq!(
+        first.grid,
+        BTreeMap::from([
+            (1, ButtonId::grid(GridKey::TopLeft)),
+            (5, ButtonId::grid(GridKey::Middle)),
+        ])
+    );
+    assert_eq!(
+        first.bindings.get(&ButtonId::grid(GridKey::Middle)),
+        Some(&Binding::Single(Action::Copy))
+    );
+    assert!(
+        !first
+            .bindings
+            .contains_key(&ButtonId::grid(GridKey::TopLeft))
+    );
+    // Two pages: the paging buttons are bound to the page actions.
+    assert_eq!(
+        first.bindings.get(&ButtonId::Control(
+            openlogi_core::binding::Cid::RIGHT_PAGING
+        )),
+        Some(&Binding::Single(Action::NextKeypadPage))
+    );
+
+    orch.turn_keypad_page(Some("keypad"), PageTurn::Next);
+    let second = orch.keyboard_spec_for().expect("spec");
+    assert_eq!(
+        second.grid, first.grid,
+        "the observed set is page-independent"
+    );
+    assert_eq!(second.wanted, first.wanted);
+    assert_eq!(
+        second.bindings.get(&ButtonId::grid(GridKey::Middle)),
+        Some(&Binding::Single(Action::Paste))
+    );
+    assert_eq!(
+        second.bindings.get(&ButtonId::grid(GridKey::TopLeft)),
+        Some(&Binding::Single(Action::Undo))
+    );
+}
+
+#[test]
+fn the_lcd_follows_the_current_page_and_turns_wrap() {
+    use crate::runtime::PageTurn;
+    use crate::watchers::key_display::KeyFace;
+    use openlogi_core::binding::ActionRingIcon;
+    let mut orch = paged_keypad();
+    let face = |orch: &Orchestrator, key| orch.key_display_specs_for()[0].faces[&key];
+    let icon = |action: Action| KeyFace::Icon(ActionRingIcon::for_action(&action));
+
+    assert_eq!(face(&orch, GridKey::Middle), icon(Action::Copy));
+    assert_eq!(face(&orch, GridKey::TopLeft), KeyFace::Blank);
+
+    orch.turn_keypad_page(Some("keypad"), PageTurn::Previous);
+    assert_eq!(
+        face(&orch, GridKey::Middle),
+        icon(Action::Paste),
+        "1 wraps back to 2"
+    );
+    assert_eq!(face(&orch, GridKey::TopLeft), icon(Action::Undo));
+
+    orch.turn_keypad_page(Some("keypad"), PageTurn::Next);
+    assert_eq!(
+        face(&orch, GridKey::Middle),
+        icon(Action::Copy),
+        "2 wraps on to 1"
+    );
+}
+
+/// A single-page device has nothing to turn, a turn with no device is
+/// dropped, and a page the config has since removed reads as page 1.
+#[test]
+fn page_turns_need_pages_and_a_removed_page_falls_back_to_the_first() {
+    use crate::runtime::PageTurn;
+    let mut orch = orchestrator(Config::default());
+    orch.devices = vec![wired_keypad("keypad", true)];
+    orch.turn_keypad_page(Some("keypad"), PageTurn::Next);
+    orch.turn_keypad_page(None, PageTurn::Next);
+    assert_eq!(orch.keypad_page("keypad"), page(1));
+
+    let mut orch = paged_keypad();
+    orch.turn_keypad_page(Some("keypad"), PageTurn::Next);
+    assert_eq!(orch.keypad_page("keypad"), page(2));
+    orch.config.set_keypad_pages("keypad", page(1));
+    assert_eq!(orch.keypad_page("keypad"), page(1));
 }

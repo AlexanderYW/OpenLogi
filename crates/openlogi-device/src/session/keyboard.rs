@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn grid_edges_are_balanced_and_ignore_unbound_keys() {
-        let grid = BTreeMap::from([(2, ButtonId::Grid(GridKey::TopMiddle))]);
+        let grid = BTreeMap::from([(2, ButtonId::grid(GridKey::TopMiddle))]);
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut down = BTreeSet::new();
 
@@ -479,8 +479,8 @@ mod tests {
         assert_eq!(
             std::iter::from_fn(|| inputs.try_recv().ok()).collect::<Vec<_>>(),
             vec![
-                CapturedInput::ButtonDown(ButtonId::Grid(GridKey::TopMiddle)),
-                CapturedInput::ButtonUp(ButtonId::Grid(GridKey::TopMiddle)),
+                CapturedInput::ButtonDown(ButtonId::grid(GridKey::TopMiddle)),
+                CapturedInput::ButtonUp(ButtonId::grid(GridKey::TopMiddle)),
             ]
         );
         // The unbound key left no residue in the held set either.
@@ -490,8 +490,8 @@ mod tests {
     #[test]
     fn grid_chords_emit_one_balanced_edge_pair_per_key() {
         let grid = BTreeMap::from([
-            (3, ButtonId::Grid(GridKey::TopRight)),
-            (8, ButtonId::Grid(GridKey::BottomMiddle)),
+            (3, ButtonId::grid(GridKey::TopRight)),
+            (8, ButtonId::grid(GridKey::BottomMiddle)),
         ]);
         let (sink, mut inputs) = mpsc::unbounded_channel();
         let mut down = BTreeSet::new();
@@ -504,10 +504,10 @@ mod tests {
         assert_eq!(
             std::iter::from_fn(|| inputs.try_recv().ok()).collect::<Vec<_>>(),
             vec![
-                CapturedInput::ButtonDown(ButtonId::Grid(GridKey::TopRight)),
-                CapturedInput::ButtonDown(ButtonId::Grid(GridKey::BottomMiddle)),
-                CapturedInput::ButtonUp(ButtonId::Grid(GridKey::TopRight)),
-                CapturedInput::ButtonUp(ButtonId::Grid(GridKey::BottomMiddle)),
+                CapturedInput::ButtonDown(ButtonId::grid(GridKey::TopRight)),
+                CapturedInput::ButtonDown(ButtonId::grid(GridKey::BottomMiddle)),
+                CapturedInput::ButtonUp(ButtonId::grid(GridKey::TopRight)),
+                CapturedInput::ButtonUp(ButtonId::grid(GridKey::BottomMiddle)),
             ]
         );
         assert_eq!(down, BTreeSet::default());

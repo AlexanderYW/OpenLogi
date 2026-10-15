@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::num::NonZeroU8;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -11,7 +12,8 @@ use super::control::Cid;
 
 /// One of the user-rebindable controls on a Logi device: a mouse hotspot,
 /// a keyboard key addressed by its HID++ `0x1b04` control ID, or a keypad grid
-/// key addressed by its [`GridKey`] position.
+/// key addressed by its [`GridSlot`] — a [`GridKey`] position on a
+/// [`KeypadPage`].
 ///
 /// The mouse variants are declared in physical front-to-side order;
 /// [`ButtonId::ALL`] is consumed by the default-binding generator and the
@@ -24,8 +26,10 @@ use super::control::Cid;
 ///
 /// Persisted as a string — the variant name for a mouse button
 /// (`"MiddleClick"`), the catalog name for a known control
-/// (`"KeyScreenCapture"`) or `"control:0x0141"` for any other — so a
-/// `ButtonId` can key a TOML table. See [`FromStr`](Self::from_str).
+/// (`"KeyScreenCapture"`) or `"control:0x0141"` for any other, and the
+/// position name for a grid key (`"gridMiddle"`, `"page2:gridMiddle"` on a
+/// later page) — so a `ButtonId` can key a TOML table. See
+/// [`FromStr`](Self::from_str).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ButtonId {
     /// The primary button. Rebindable in the config schema, but the OS hook
@@ -70,11 +74,15 @@ pub enum ButtonId {
     /// Logi metadata slot `SLOT_NAME_RIGHT_SCROLL_BUTTON`. Counterpart to
     /// [`ButtonId::WheelTiltLeft`].
     WheelTiltRight,
-    /// A key on a keypad's 3×3 LCD grid, addressed by its position. These keys
-    /// report through a vendor report rather than `0x1b04`, so they have no
-    /// control ID and no divertable state: bound or not, they emit nothing of
-    /// their own to the host, and OpenLogi only ever observes them.
-    Grid(GridKey),
+    /// A key on a keypad's 3×3 LCD grid, on one of the keypad's binding pages.
+    /// These keys report through a vendor report rather than `0x1b04`, so they
+    /// have no control ID and no divertable state: bound or not, they emit
+    /// nothing of their own to the host, and OpenLogi only ever observes them.
+    ///
+    /// Capture is physical: a session observes and reports a key as its
+    /// first-page slot ([`ButtonId::grid`]), and the page the keypad is on
+    /// decides which slot's binding that press dispatches.
+    Grid(GridSlot),
     /// A keyboard key, by the HID++ `0x1b04` control it reports as. Diverted
     /// over HID++ while bound (the OS hook never sees these keys); left on its
     /// native firmware function otherwise.
@@ -121,11 +129,21 @@ impl ButtonId {
         }
     }
 
-    /// The grid position this button addresses, for a keypad grid key.
+    /// The physical grid key `key` — its first-page slot, the identity a
+    /// capture session reports a press as.
     #[must_use]
-    pub const fn grid_key(self) -> Option<GridKey> {
+    pub const fn grid(key: GridKey) -> Self {
+        Self::Grid(GridSlot {
+            page: KeypadPage::FIRST,
+            key,
+        })
+    }
+
+    /// The page and position this button addresses, for a keypad grid key.
+    #[must_use]
+    pub const fn grid_slot(self) -> Option<GridSlot> {
         match self {
-            Self::Grid(key) => Some(key),
+            Self::Grid(slot) => Some(slot),
             _ => None,
         }
     }
@@ -235,7 +253,7 @@ impl ButtonId {
     pub fn config_name(self) -> Cow<'static, str> {
         match self {
             ButtonId::Control(cid) => cid.config_name(),
-            ButtonId::Grid(key) => Cow::Borrowed(key.config_name()),
+            ButtonId::Grid(slot) => slot.config_name(),
             other => Cow::Borrowed(other.unit_name().unwrap_or_default()),
         }
     }
@@ -257,7 +275,7 @@ impl ButtonId {
             ButtonId::ThumbwheelScrollDown => "Thumb Wheel Down",
             ButtonId::GestureButton => "Gesture Button",
             ButtonId::HapticPanel => "Haptic Panel",
-            ButtonId::Grid(key) => return Cow::Borrowed(key.label()),
+            ButtonId::Grid(slot) => return slot.label(),
             ButtonId::Control(cid) => return cid.label(),
         })
     }
@@ -279,7 +297,9 @@ impl ButtonId {
             ButtonId::ThumbwheelScrollDown => "pointer.thumb_wheel_down",
             ButtonId::GestureButton => "actions.gesture_button",
             ButtonId::HapticPanel => "actions.haptic_panel",
-            ButtonId::Grid(key) => key.translation_key(),
+            // The page is context the caller shows beside the key, not part
+            // of the key's name.
+            ButtonId::Grid(slot) => slot.key.translation_key(),
             ButtonId::Control(cid) => cid.translation_key(),
         }
     }
@@ -436,6 +456,170 @@ impl GridKey {
     }
 }
 
+/// One of a keypad's binding pages, numbered from 1.
+///
+/// The keypad's nine keys carry one binding set per page; the page buttons
+/// (or any key bound to [`Action::NextKeypadPage`](super::Action::NextKeypadPage)
+/// / [`Action::PreviousKeypadPage`](super::Action::PreviousKeypadPage)) move
+/// between them. A device's page *count* is a page too: the last one.
+///
+/// Persisted and sent as its number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KeypadPage(NonZeroU8);
+
+impl KeypadPage {
+    /// Page 1 — the only page a keypad has until more are added.
+    pub const FIRST: Self = Self(NonZeroU8::MIN);
+    /// The most pages a keypad can have, matching Logi Options+.
+    pub const MAX: Self = match NonZeroU8::new(15) {
+        Some(max) => Self(max),
+        None => unreachable!(),
+    };
+
+    /// Page `number`, or `None` outside `1..=MAX`.
+    #[must_use]
+    pub const fn new(number: u8) -> Option<Self> {
+        match NonZeroU8::new(number) {
+            Some(page) if number <= Self::MAX.number() => Some(Self(page)),
+            _ => None,
+        }
+    }
+
+    /// The page's number, from 1.
+    #[must_use]
+    pub const fn number(self) -> u8 {
+        self.0.get()
+    }
+
+    /// The page after this one on a keypad whose last page is `last`,
+    /// wrapping to page 1. A page past `last` (the count shrank under it)
+    /// also lands on page 1.
+    #[must_use]
+    pub const fn next_within(self, last: Self) -> Self {
+        if self.number() >= last.number() {
+            Self::FIRST
+        } else {
+            Self(self.0.saturating_add(1))
+        }
+    }
+
+    /// The page before this one on a keypad whose last page is `last`,
+    /// wrapping from page 1 to `last`. A page past `last` lands on `last`.
+    #[must_use]
+    pub const fn previous_within(self, last: Self) -> Self {
+        if self.number() == 1 || self.number() > last.number() {
+            last
+        } else {
+            match NonZeroU8::new(self.number() - 1) {
+                Some(page) => Self(page),
+                None => last,
+            }
+        }
+    }
+
+    /// Every page from 1 through `self`.
+    pub fn through(self) -> impl Iterator<Item = Self> {
+        (1..=self.number()).filter_map(Self::new)
+    }
+}
+
+impl Default for KeypadPage {
+    fn default() -> Self {
+        Self::FIRST
+    }
+}
+
+impl fmt::Display for KeypadPage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.number())
+    }
+}
+
+impl Serialize for KeypadPage {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(self.number())
+    }
+}
+
+impl<'de> Deserialize<'de> for KeypadPage {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let number = u8::deserialize(deserializer)?;
+        Self::new(number).ok_or_else(|| {
+            de::Error::custom(format!(
+                "keypad page {number} is outside 1..={}",
+                Self::MAX.number()
+            ))
+        })
+    }
+}
+
+/// A keypad grid key on one binding page — what a grid binding is keyed by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GridSlot {
+    /// The binding page.
+    pub page: KeypadPage,
+    /// The physical key.
+    pub key: GridKey,
+}
+
+/// Prefix of a later page's grid name: `page2:gridMiddle`.
+const PAGE_PREFIX: &str = "page";
+
+impl GridSlot {
+    /// The persisted name: the key's position name on page 1, and
+    /// `page<n>:` + it on a later page.
+    #[must_use]
+    pub fn config_name(self) -> Cow<'static, str> {
+        if self.page == KeypadPage::FIRST {
+            Cow::Borrowed(self.key.config_name())
+        } else {
+            Cow::Owned(format!(
+                "{PAGE_PREFIX}{}:{}",
+                self.page,
+                self.key.config_name()
+            ))
+        }
+    }
+
+    /// The inverse of [`Self::config_name`]. A page-1 slot has exactly one
+    /// spelling: `page1:` is not accepted, so a config cannot bind one slot
+    /// twice under two names.
+    #[must_use]
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        let Some((page, key)) = name
+            .strip_prefix(PAGE_PREFIX)
+            .and_then(|rest| rest.split_once(':'))
+        else {
+            return GridKey::from_config_name(name).map(|key| Self {
+                page: KeypadPage::FIRST,
+                key,
+            });
+        };
+        // Digits only: `u8::from_str` would also take a leading `+`.
+        let page = page
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| page.parse().ok())
+            .flatten()
+            .and_then(KeypadPage::new)
+            .filter(|page| *page != KeypadPage::FIRST)?;
+        Some(Self {
+            page,
+            key: GridKey::from_config_name(key)?,
+        })
+    }
+
+    /// Human-readable label: the key's, plus its page past the first.
+    #[must_use]
+    pub fn label(self) -> Cow<'static, str> {
+        if self.page == KeypadPage::FIRST {
+            Cow::Borrowed(self.key.label())
+        } else {
+            Cow::Owned(format!("{}, Page {}", self.key.label(), self.page))
+        }
+    }
+}
+
 /// A persisted button name that names no button.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("unknown button `{0}`")]
@@ -445,13 +629,13 @@ impl FromStr for ButtonId {
     type Err = ParseButtonIdError;
 
     /// The inverse of [`ButtonId::config_name`]: a mouse button's variant
-    /// name, a grid key's position name, a known control's catalog name, or
+    /// name, a grid slot's name, a known control's catalog name, or
     /// `control:0x…`.
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         ButtonId::UNIT_NAMES
             .into_iter()
             .find_map(|(button, unit_name)| (unit_name == name).then_some(button))
-            .or_else(|| GridKey::from_config_name(name).map(Self::Grid))
+            .or_else(|| GridSlot::from_config_name(name).map(Self::Grid))
             .or_else(|| Cid::from_config_name(name).map(ButtonId::Control))
             .ok_or_else(|| ParseButtonIdError(name.to_owned()))
     }

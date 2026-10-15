@@ -97,6 +97,8 @@ pub(crate) fn action_icon_path(action: &Action) -> &'static str {
         Action::MuteVolume => "action-icons/volume-x.svg",
         Action::CycleDpiPresets | Action::SetDpiPreset(_) => "action-icons/gauge.svg",
         Action::ToggleSmartShift => "action-icons/refresh-cw.svg",
+        Action::PreviousKeypadPage => "action-icons/chevron-left.svg",
+        Action::NextKeypadPage => "action-icons/chevron-right.svg",
         Action::ScrollUp => "action-icons/chevrons-up.svg",
         Action::ScrollDown => "action-icons/chevrons-down.svg",
         Action::HorizontalScrollLeft => "action-icons/chevrons-left.svg",

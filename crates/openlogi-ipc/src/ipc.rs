@@ -115,7 +115,10 @@ pub use succession::Identity;
 ///      `Agent::{read_brightness, set_brightness}` and
 ///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
 ///      `0x8040` device brightness; `HidppOperation::WriteKeyImage` appended —
-///      an image written to one of the MX Creative Keypad's LCD keys.
+///      an image written to one of the MX Creative Keypad's LCD keys;
+///      `Action::{PreviousKeypadPage, NextKeypadPage}` appended and `ButtonId`
+///      grid keys gain page-qualified names (`page2:gridMiddle`) — the
+///      keypad's binding pages.
 pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Environment variable through which the agent hands a supervised helper the
