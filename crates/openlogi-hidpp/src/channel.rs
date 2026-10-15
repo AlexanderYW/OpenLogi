@@ -150,7 +150,7 @@ impl Drop for MessageListenerGuard {
 }
 
 /// Removes a raw report listener when dropped (OpenLogi local addition — see
-/// [`RawReportListener`]).
+/// [`HidppChannel::add_raw_report_listener`]).
 pub struct RawReportListenerGuard {
     raw_listeners: Weak<Mutex<HashMap<u32, RawReportListener>>>,
     hdl: u32,
@@ -763,7 +763,9 @@ impl HidppChannel {
 
     /// Registers a listener called with every raw report read from the
     /// transport, in the wire's framing, whatever protocol it belongs to
-    /// (OpenLogi local addition — see [`RawReportListener`]).
+    /// — how a device's vendor PDUs sharing the node with HID++, such as the
+    /// MX Creative Keypad's grid-key reports, are captured (OpenLogi local
+    /// addition).
     ///
     /// Returns a handle that can be used to remove the listener using a call
     /// to [`Self::remove_raw_report_listener`].

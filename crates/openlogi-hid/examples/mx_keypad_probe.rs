@@ -48,8 +48,7 @@ fn set_reporting(cid: u16, reporting: u8) -> Vec<u8> {
     buf[1] = 0xff;
     buf[2] = 0x0b; // 0x1b04 at index 11
     buf[3] = 0x3a; // fn 3, sw 1
-    buf[4] = (cid >> 8) as u8;
-    buf[5] = cid as u8;
+    [buf[4], buf[5]] = cid.to_be_bytes();
     buf[6] = reporting;
     buf
 }
