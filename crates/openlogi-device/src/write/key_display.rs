@@ -55,7 +55,7 @@ pub fn key_display_for(route: &DeviceRoute) -> Option<KeyDisplay> {
     else {
         return None;
     };
-    find_keypad(*vendor_id, *product_id).and_then(|keypad| keypad.key_display)
+    find_keypad(*vendor_id, *product_id).map(|keypad| keypad.key_display)
 }
 
 /// A baseline JPEG small enough for the image write's `u16` length field.
