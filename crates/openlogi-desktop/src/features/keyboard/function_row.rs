@@ -37,9 +37,14 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, canvas, div, hsla,
     point, prelude::FluentBuilder as _, px, rgb, svg,
 };
+use gpui_component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
+use gpui_component::dialog::DialogButtonProps;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{Selectable as _, h_flex, input::InputState, v_flex};
-use openlogi_core::binding::{Action, ButtonId, Cid, GridKey, WorkflowStep};
+use gpui_component::{
+    Disableable as _, IconName, Selectable as _, Sizable as _, WindowExt as _, h_flex,
+    input::InputState, v_flex,
+};
+use openlogi_core::binding::{Action, ButtonId, Cid, GridKey, KeypadPage, WorkflowStep};
 use openlogi_core::device::DeviceKind;
 
 use super::editors::{
@@ -53,7 +58,7 @@ use crate::features::binding_editor::{
 use crate::features::mouse::geometry::asset_dimensions_for_png;
 use crate::features::profiles::friendly_app_name;
 use crate::services::assets::{GlowGeometry, ResolvedAsset};
-use crate::state::{AppState, StateEvent, StateEvents};
+use crate::state::{AppState, DeviceKey, DeviceRecord, StateEvent, StateEvents};
 use crate::ui::action::localized_action_label;
 use crate::ui::components::MenuRow;
 use crate::ui::theme::{self, ACCENT_BLUE, Palette, Typography as _};
@@ -107,6 +112,12 @@ pub struct FunctionRowView {
     text_state: Option<Entity<InputState>>,
     /// Draft copy of the Workflow steps under edit.
     workflow_draft: Vec<WorkflowStep>,
+    /// The keypad binding page the grid keys are being edited on — this
+    /// editor's own choice, independent of the page the keypad is showing.
+    keypad_page: KeypadPage,
+    /// The device [`Self::keypad_page`] was chosen on; another device starts
+    /// back on page 1.
+    keypad_device: Option<DeviceKey>,
     _state_obs: Subscription,
 }
 
@@ -121,6 +132,8 @@ impl FunctionRowView {
             active_editor: None,
             text_state: None,
             workflow_draft: Vec::new(),
+            keypad_page: KeypadPage::FIRST,
+            keypad_device: None,
             _state_obs: state_obs,
         }
     }
@@ -151,6 +164,35 @@ impl FunctionRowView {
     pub(crate) fn set_hovered_key(&mut self, idx: Option<usize>, cx: &mut Context<Self>) {
         if self.hovered_key != idx {
             self.hovered_key = idx;
+            cx.notify();
+        }
+    }
+
+    /// Keep the edited page on the selected device's pages — page 1 on a new
+    /// device, clamped when pages were removed — and answer the device's last
+    /// page and whether removing it would drop bindings (so removal asks).
+    fn sync_keypad_page(&mut self, state: Option<&AppState>) -> (KeypadPage, bool) {
+        let record_key = state
+            .and_then(AppState::current_record)
+            .map(DeviceRecord::device_key);
+        if self.keypad_device != record_key {
+            self.keypad_device = record_key;
+            self.keypad_page = KeypadPage::FIRST;
+        }
+        let last = state.map_or(KeypadPage::FIRST, AppState::current_keypad_pages);
+        self.keypad_page = self.keypad_page.min(last);
+        let last_bound = state.is_some_and(|state| {
+            state.button_bindings().iter().any(|(button, action)| {
+                button.grid_slot().is_some_and(|slot| slot.page == last) && *action != Action::None
+            })
+        });
+        (last, last_bound)
+    }
+
+    /// Edit the grid keys on `page`.
+    pub(crate) fn set_keypad_page(&mut self, page: KeypadPage, cx: &mut Context<Self>) {
+        if self.keypad_page != page {
+            self.keypad_page = page;
             cx.notify();
         }
     }
@@ -243,7 +285,9 @@ impl Render for FunctionRowView {
         } else {
             keyboard_render_size(asset, viewport_h)
         };
-        let slots = key_slots_from_layouts(surface, state);
+        let (last_page, last_page_bound) = self.sync_keypad_page(state);
+        let pal = theme::palette(cx);
+        let slots = key_slots_from_layouts(surface, state, self.keypad_page);
 
         // A stale selection can outlive a device switch to a shorter F-row;
         // drop it instead of indexing past the new slot list.
@@ -306,14 +350,105 @@ impl Render for FunctionRowView {
                 .into_any_element()
         };
         let panel = selected.map(|selected| self.config_panel(selected, &slots, &view, cx));
+        let page_bar = (keypad || keypad_photo)
+            .then(|| keypad_page_bar(self.keypad_page, last_page, last_page_bound, &view, &pal));
 
         // The whole row animates as one: when a key is selected the right-side
         // panel grows in and the keyboard nudges left to make room.
         v_flex()
             .w_full()
             .items_center()
+            .gap_3()
+            .children(page_bar)
             .child(InspectorRow::new(device).panel(panel))
     }
+}
+
+/// A keypad's binding pages: pick the page the grid keys are edited on, add
+/// one after the last, or remove the last. Removing a page that still binds
+/// keys asks first, because its bindings go with it; an empty one just goes.
+fn keypad_page_bar(
+    page: KeypadPage,
+    last: KeypadPage,
+    last_page_bound: bool,
+    view: &Entity<FunctionRowView>,
+    pal: &Palette,
+) -> impl IntoElement {
+    let pages: Vec<KeypadPage> = last.through().collect();
+    let select = {
+        let view = view.clone();
+        let pages = pages.clone();
+        move |indices: &Vec<usize>, _: &mut Window, cx: &mut App| {
+            if let Some(page) = indices.first().and_then(|index| pages.get(*index)) {
+                view.update(cx, |view, cx| view.set_keypad_page(*page, cx));
+            }
+        }
+    };
+    let group = ButtonGroup::new("keypad-pages")
+        .outline()
+        .small()
+        .children(pages.iter().map(|candidate| {
+            Button::new(("keypad-page", usize::from(candidate.number())))
+                .label(candidate.to_string())
+                .selected(*candidate == page)
+        }))
+        .on_click(select);
+    let added = KeypadPage::new(last.number().saturating_add(1));
+    let add = {
+        let view = view.clone();
+        Button::new("keypad-add-page")
+            .ghost()
+            .small()
+            .icon(IconName::Plus)
+            .label(tr!("keyboard.add_page"))
+            .disabled(added.is_none())
+            .on_click(move |_, _, cx| {
+                let Some(added) = added else { return };
+                AppState::apply(cx, |state| state.commit_keypad_pages(added));
+                view.update(cx, |view, cx| view.set_keypad_page(added, cx));
+            })
+    };
+    let remaining = KeypadPage::new(last.number().saturating_sub(1));
+    let remove = Button::new("keypad-remove-page")
+        .ghost()
+        .small()
+        .label(tr!("keyboard.remove_page", page => last.number()))
+        .disabled(remaining.is_none())
+        .on_click(move |_, window, cx| {
+            let Some(remaining) = remaining else { return };
+            if !last_page_bound {
+                AppState::apply(cx, |state| state.commit_keypad_pages(remaining));
+                return;
+            }
+            window.open_alert_dialog(cx, move |alert, _, _| {
+                alert
+                    .title(tr!("keyboard.remove_page_question", page => last.number()))
+                    .description(tr!("keyboard.remove_page_description"))
+                    .button_props(
+                        DialogButtonProps::default()
+                            .ok_text(tr!("keyboard.remove_page", page => last.number()))
+                            .ok_variant(ButtonVariant::Danger)
+                            .cancel_text(tr!("common.cancel"))
+                            .show_cancel(true),
+                    )
+                    .on_ok(move |_, _, cx| {
+                        AppState::apply(cx, |state| state.commit_keypad_pages(remaining));
+                        true
+                    })
+            });
+        });
+    h_flex()
+        .gap_2()
+        .items_center()
+        .child(
+            div()
+                .text_caption()
+                .text_color(pal.text_muted)
+                .child(tr!("keyboard.pages")),
+        )
+        .child(group)
+        .child(add)
+        .child(remove)
 }
 
 fn binding_line(
@@ -385,12 +520,18 @@ struct KeySlot {
 /// One [`KeySlot`] per displayed key, each carrying the action it is bound
 /// to right now — the panes and the config panel render the same truth
 /// from the same source.
-fn key_slots_from_layouts(surface: KeySurface, state: Option<&AppState>) -> Vec<KeySlot> {
+/// The tab's keys with their current bindings, grid keys read on `page`.
+fn key_slots_from_layouts(
+    surface: KeySurface,
+    state: Option<&AppState>,
+    page: KeypadPage,
+) -> Vec<KeySlot> {
     surface
         .slots()
         .into_iter()
         .enumerate()
-        .map(|(idx, layout)| {
+        .map(|(idx, mut layout)| {
+            layout.target = layout.target.on_page(page);
             let bound = state.and_then(|state| bound_action(state, &layout.target));
             KeySlot {
                 idx,
@@ -415,9 +556,9 @@ fn bound_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
             .get(button)
             .filter(|action| **action != Action::None)
             .cloned(),
-        KeyTarget::Grid(key) => state
+        KeyTarget::Grid(slot) => state
             .button_bindings()
-            .get(&ButtonId::grid(*key))
+            .get(&ButtonId::Grid(*slot))
             .filter(|action| **action != Action::None)
             .cloned(),
         KeyTarget::FunctionKey(trigger) => state.keyboard_bindings().get(trigger).cloned(),
@@ -435,8 +576,8 @@ pub(super) fn commit_key_action(
 ) -> StateEvents {
     match target {
         KeyTarget::Control(button) => state.commit_binding(*button, action.unwrap_or(Action::None)),
-        KeyTarget::Grid(key) => {
-            state.commit_binding(ButtonId::grid(*key), action.unwrap_or(Action::None))
+        KeyTarget::Grid(slot) => {
+            state.commit_binding(ButtonId::Grid(*slot), action.unwrap_or(Action::None))
         }
         KeyTarget::FunctionKey(trigger) => state.commit_keyboard_binding(trigger.clone(), action),
     }
@@ -892,7 +1033,7 @@ fn keycap_height(target: &KeyTarget) -> f32 {
 /// The glyph drawn on a cap's face.
 fn keycap_glyph(target: &KeyTarget) -> Option<&'static str> {
     match target {
-        KeyTarget::Grid(key) => Some(grid_glyph(*key)),
+        KeyTarget::Grid(slot) => Some(grid_glyph(slot.key)),
         KeyTarget::Control(button) => button.cid().and_then(paging_glyph),
         KeyTarget::FunctionKey(_) => None,
     }
