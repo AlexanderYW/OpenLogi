@@ -60,20 +60,30 @@ pub fn key_display_for(route: &DeviceRoute) -> Option<KeyDisplay> {
 
 /// A baseline JPEG small enough for the image write's `u16` length field.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyImageJpeg(Vec<u8>);
+pub struct KeyImageJpeg {
+    bytes: Vec<u8>,
+    /// `bytes.len()`, as the write declares it.
+    len: u16,
+}
 
 impl KeyImageJpeg {
     /// Wrap encoded JPEG bytes, or `None` when they are empty or longer than
     /// the write can declare (`u16::MAX`).
     #[must_use]
     pub fn new(bytes: Vec<u8>) -> Option<Self> {
-        (!bytes.is_empty() && u16::try_from(bytes.len()).is_ok()).then_some(Self(bytes))
+        let len = u16::try_from(bytes.len()).ok().filter(|&len| len > 0)?;
+        Some(Self { bytes, len })
     }
 
     /// The encoded bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        &self.bytes
+    }
+
+    /// The length field of the image write's first packet.
+    fn declared_len(&self) -> u16 {
+        self.len
     }
 }
 
@@ -141,12 +151,13 @@ fn is_image_ack(report: &[u8]) -> bool {
     input_payload(report, VendorFunction::Image).is_some()
 }
 
-fn part_byte(index: u8, first: bool, last: bool) -> u8 {
+/// The part byte of packet `index` (1-based) of a write of `count` packets.
+fn part_byte(index: u8, count: usize) -> u8 {
     let mut byte = index | 0x20;
-    if first {
+    if index == 1 {
         byte |= 0x80;
     }
-    if last {
+    if usize::from(index) == count {
         byte |= 0x40;
     }
     byte
@@ -161,28 +172,25 @@ fn packet_header(part: u8) -> [u8; 5] {
 /// `(x, y)`.
 fn image_packets(x: u16, y: u16, size: u16, image: &KeyImageJpeg) -> Vec<Vec<u8>> {
     let jpeg = image.as_bytes();
-    // `KeyImageJpeg` bounds the length by construction.
-    let total = u16::try_from(jpeg.len()).unwrap_or(u16::MAX);
     let first_len = jpeg.len().min(PACKET_LEN - FIRST_HEADER_LEN);
-    let continuations = (jpeg.len() - first_len).div_ceil(PACKET_LEN - NEXT_HEADER_LEN);
+    let count = 1 + (jpeg.len() - first_len).div_ceil(PACKET_LEN - NEXT_HEADER_LEN);
 
     let mut first = vec![0u8; PACKET_LEN];
-    first[..5].copy_from_slice(&packet_header(part_byte(1, true, continuations == 0)));
+    first[..5].copy_from_slice(&packet_header(part_byte(1, count)));
     first[5..7].copy_from_slice(&0x0100u16.to_be_bytes());
     first[7..9].copy_from_slice(&0x0100u16.to_be_bytes());
     first[9..11].copy_from_slice(&x.to_be_bytes());
     first[11..13].copy_from_slice(&y.to_be_bytes());
     first[13..15].copy_from_slice(&size.to_be_bytes());
     first[15..17].copy_from_slice(&size.to_be_bytes());
-    first[18..20].copy_from_slice(&total.to_be_bytes());
+    first[18..20].copy_from_slice(&image.declared_len().to_be_bytes());
     first[FIRST_HEADER_LEN..FIRST_HEADER_LEN + first_len].copy_from_slice(&jpeg[..first_len]);
 
     let mut packets = vec![first];
     let rest = jpeg[first_len..].chunks(PACKET_LEN - NEXT_HEADER_LEN);
     for (index, chunk) in (2u8..).zip(rest) {
-        let last = usize::from(index) - 1 == continuations;
         let mut packet = vec![0u8; PACKET_LEN];
-        packet[..NEXT_HEADER_LEN].copy_from_slice(&packet_header(part_byte(index, false, last)));
+        packet[..NEXT_HEADER_LEN].copy_from_slice(&packet_header(part_byte(index, count)));
         packet[NEXT_HEADER_LEN..NEXT_HEADER_LEN + chunk.len()].copy_from_slice(chunk);
         packets.push(packet);
     }
