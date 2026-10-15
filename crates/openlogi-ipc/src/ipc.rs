@@ -19,9 +19,9 @@ use openlogi_core::device::{
     BatteryInfo, ChangedOnLight, DeviceInventory, DeviceKind, LightState, LockKey, StandaloneDevice,
 };
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    LightCommand, PairingError, PasskeyMethod, PointerSpeed, ReceiverSelector, ReportRate,
-    ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
+    FnLockState, LightCommand, PairingError, PasskeyMethod, PointerSpeed, ReceiverSelector,
+    ReportRate, ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
@@ -131,7 +131,9 @@ pub use succession::Identity;
 ///      that precision mode lights. `ReceiverSelector::ReceiverUid`
 ///      appended — a pairing target matched by receiver product ID and
 ///      unique ID, never falling back to another receiver.
-/// v39: `Capabilities::{brightness, creative_keypad}` appended — the
+/// v39: `Capabilities::{brightness, creative_keypad}`,
+///      `Agent::{read_brightness, set_brightness}` and
+///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
 ///      `0x8040` device brightness and the MX Creative Console family marker.
 pub const PROTOCOL_VERSION: u32 = 39;
 
@@ -872,4 +874,11 @@ pub trait Agent {
         route: DeviceRoute,
         speed: PointerSpeed,
     ) -> Result<PointerSpeed, WriteError>;
+    /// Read `route`'s current brightness with the range the device
+    /// advertised — the read-only counterpart of [`Self::set_brightness`].
+    async fn read_brightness(route: DeviceRoute) -> Result<BrightnessState, WriteError>;
+    /// Set the brightness on `route` now and answer with the state the device
+    /// echoes back, so the GUI reflects what the firmware actually accepted
+    /// rather than what was requested.
+    async fn set_brightness(route: DeviceRoute, level: u16) -> Result<BrightnessState, WriteError>;
 }

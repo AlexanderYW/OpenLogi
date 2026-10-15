@@ -307,8 +307,8 @@ mod tests {
         BatteryLevel, BatteryStatus, DeviceKind, HidppLegacyBatteryStatus,
         HidppVoltageChargingStatus, UnifyingDeviceKind, coarse_legacy_battery_level,
         direct_identity_kind, legacy_battery_info, legacy_battery_level_from_percentage,
-        map_unifying_kind,
-        map_voltage_battery_status, resolve_device_kind, voltage_battery_percentage,
+        map_unifying_kind, map_voltage_battery_status, resolve_device_kind,
+        voltage_battery_percentage,
     };
 
     #[test]
