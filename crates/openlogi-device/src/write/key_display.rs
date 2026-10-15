@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use openlogi_core::binding::GridKey;
 pub use openlogi_device_registry::keypad::KeyDisplay;
-use openlogi_device_registry::keypad::find_keypad;
+use openlogi_device_registry::keypad::{PanelPoint, find_keypad};
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -99,13 +99,10 @@ pub async fn write_key_image_on(
     key: GridKey,
     image: &KeyImageJpeg,
 ) -> Result<(), WriteError> {
-    let (row, col) = key.position();
-    let (x, y) = u16::try_from(row)
-        .ok()
-        .zip(u16::try_from(col).ok())
-        .and_then(|(row, col)| display.key_origin(row, col))
+    let origin = display
+        .key_origin(key.position())
         .ok_or_else(|| WriteError::Hidpp(format!("{key:?} is off the panel's key grid")))?;
-    let packets = image_packets(x, y, display.key_size, image);
+    let packets = image_packets(origin, display.key_size, image);
 
     let channel = shared.channel();
     let (ack_tx, ack_rx) = oneshot::channel();
@@ -169,8 +166,8 @@ fn packet_header(part: u8) -> [u8; 5] {
 }
 
 /// Split `image` into the vendor write's packets for a `size`-square tile at
-/// `(x, y)`.
-fn image_packets(x: u16, y: u16, size: u16, image: &KeyImageJpeg) -> Vec<Vec<u8>> {
+/// `origin`.
+fn image_packets(origin: PanelPoint, size: u16, image: &KeyImageJpeg) -> Vec<Vec<u8>> {
     let jpeg = image.as_bytes();
     let first_len = jpeg.len().min(PACKET_LEN - FIRST_HEADER_LEN);
     let count = 1 + (jpeg.len() - first_len).div_ceil(PACKET_LEN - NEXT_HEADER_LEN);
@@ -179,8 +176,8 @@ fn image_packets(x: u16, y: u16, size: u16, image: &KeyImageJpeg) -> Vec<Vec<u8>
     first[..5].copy_from_slice(&packet_header(part_byte(1, count)));
     first[5..7].copy_from_slice(&0x0100u16.to_be_bytes());
     first[7..9].copy_from_slice(&0x0100u16.to_be_bytes());
-    first[9..11].copy_from_slice(&x.to_be_bytes());
-    first[11..13].copy_from_slice(&y.to_be_bytes());
+    first[9..11].copy_from_slice(&origin.x.to_be_bytes());
+    first[11..13].copy_from_slice(&origin.y.to_be_bytes());
     first[13..15].copy_from_slice(&size.to_be_bytes());
     first[15..17].copy_from_slice(&size.to_be_bytes());
     first[18..20].copy_from_slice(&image.declared_len().to_be_bytes());

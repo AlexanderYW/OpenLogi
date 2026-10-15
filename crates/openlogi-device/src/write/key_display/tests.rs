@@ -1,5 +1,5 @@
 use openlogi_core::binding::GridKey;
-use openlogi_device_registry::keypad::find_keypad;
+use openlogi_device_registry::keypad::{KeyGrid, find_keypad};
 
 use super::*;
 use crate::channel::scripted::{ScriptedRawHidChannel, scripted_channel};
@@ -42,8 +42,8 @@ async fn keypad(acks: bool) -> (SharedChannel, ReplayChannelHandle) {
 #[test]
 fn a_single_packet_tile_matches_the_hardware_verified_header() {
     let display = display();
-    let (x, y) = display.key_origin(0, 0).unwrap();
-    let packets = image_packets(x, y, display.key_size, &jpeg(1024));
+    let origin = display.key_origin(GridKey::TopLeft.position()).unwrap();
+    let packets = image_packets(origin, display.key_size, &jpeg(1024));
 
     assert_eq!(packets.len(), 1);
     assert_eq!(packets[0].len(), PACKET_LEN);
@@ -71,7 +71,7 @@ fn a_large_image_continues_in_marked_packets_that_carry_the_rest() {
     let next_room = PACKET_LEN - NEXT_HEADER_LEN;
     let len = first_room + next_room + 10;
     let image = jpeg(len);
-    let packets = image_packets(181, 164, 118, &image);
+    let packets = image_packets(PanelPoint { x: 181, y: 164 }, 118, &image);
 
     assert_eq!(packets.len(), 3);
     // First: index 1, first marker, not last; declares the whole length.
@@ -94,7 +94,11 @@ fn a_large_image_continues_in_marked_packets_that_carry_the_rest() {
 
 #[test]
 fn an_image_exactly_filling_the_first_packet_is_one_packet() {
-    let packets = image_packets(0, 0, 118, &jpeg(PACKET_LEN - FIRST_HEADER_LEN));
+    let packets = image_packets(
+        PanelPoint { x: 0, y: 0 },
+        118,
+        &jpeg(PACKET_LEN - FIRST_HEADER_LEN),
+    );
     assert_eq!(packets.len(), 1);
     assert_eq!(packets[0][4], 0xe1);
 }
@@ -176,7 +180,7 @@ async fn a_tile_the_device_never_acknowledges_times_out() {
 async fn a_key_off_the_panel_writes_nothing() {
     let (shared, handle) = keypad(true).await;
     let one_key = KeyDisplay {
-        grid: (1, 1),
+        grid: KeyGrid { rows: 1, cols: 1 },
         ..display()
     };
 
