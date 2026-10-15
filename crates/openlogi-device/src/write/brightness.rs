@@ -74,7 +74,7 @@ async fn write_level(
             BrightnessControlFeature::ID,
         )
     })?;
-    let applied = read_state(feature).await?;
+    let applied = read_level(feature, info).await?;
     debug!(
         index,
         requested,
@@ -107,6 +107,14 @@ async fn read_info(feature: &BrightnessControlFeature) -> Result<BrightnessInfo,
 
 async fn read_state(feature: &BrightnessControlFeature) -> Result<BrightnessState, WriteError> {
     let info = read_info(feature).await?;
+    read_level(feature, info).await
+}
+
+/// The device's level, against the range `info` already read from it.
+async fn read_level(
+    feature: &BrightnessControlFeature,
+    info: BrightnessInfo,
+) -> Result<BrightnessState, WriteError> {
     let level = feature.get_brightness().await.map_err(|error| {
         classify_hidpp_error(
             error,
