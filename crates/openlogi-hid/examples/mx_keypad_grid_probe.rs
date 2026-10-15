@@ -98,11 +98,11 @@ async fn window(
     let mut last_ping = start;
     let mut counts: BTreeMap<(String, u8), usize> = BTreeMap::new();
     while start.elapsed() < Duration::from_secs(60) {
-        if let Some(w) = pump {
-            if last_ping.elapsed() >= Duration::from_millis(950) {
-                last_ping = Instant::now();
-                let _ = w.lock().await.write_output_report(&keepalive()).await;
-            }
+        if let Some(w) = pump
+            && last_ping.elapsed() >= Duration::from_millis(950)
+        {
+            last_ping = Instant::now();
+            let _ = w.lock().await.write_output_report(&keepalive()).await;
         }
         for node in nodes.iter_mut() {
             let mut buf = [0u8; 64];
@@ -112,7 +112,7 @@ async fn window(
             )
             .await
             {
-                Ok(Ok(0)) => {}
+                Ok(Ok(0)) | Err(_) => {}
                 Ok(Ok(n)) => {
                     *counts.entry((node.tag.clone(), buf[0])).or_insert(0) += 1;
                     println!(
@@ -123,7 +123,6 @@ async fn window(
                     );
                 }
                 Ok(Err(e)) => println!("  read error on {}: {e}", node.tag),
-                Err(_) => {}
             }
         }
     }
@@ -167,17 +166,17 @@ async fn map_mode(nodes: &mut [Node]) {
             )
             .await
             {
-                Ok(Ok(0)) => {}
+                Ok(Ok(0)) | Err(_) => {}
                 Ok(Ok(n)) => {
-                    if let Some((seq, key)) = grid_event(&buf[..n]) {
-                        if seen.insert((seq, key)) && !order.contains(&key) {
-                            order.push(key);
-                            println!("  press #{:>1} -> key index {}", order.len(), key);
-                        }
+                    if let Some((seq, key)) = grid_event(&buf[..n])
+                        && seen.insert((seq, key))
+                        && !order.contains(&key)
+                    {
+                        order.push(key);
+                        println!("  press #{:>1} -> key index {}", order.len(), key);
                     }
                 }
                 Ok(Err(e)) => println!("  read error on {}: {e}", node.tag),
-                Err(_) => {}
             }
         }
     }
