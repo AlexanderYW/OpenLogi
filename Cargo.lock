@@ -5531,6 +5531,7 @@ dependencies = [
  "futures-lite",
  "image",
  "openlogi-core",
+ "openlogi-device-registry",
  "openlogi-fixture",
  "openlogi-hid",
  "openlogi-hook",

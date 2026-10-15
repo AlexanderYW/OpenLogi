@@ -50,5 +50,5 @@ workspace = true
 
 [dev-dependencies]
 # The keypad LCD probe example encodes its test tiles as JPEG.
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+image = { workspace = true, features = ["jpeg"] }
 tempfile = "3"
