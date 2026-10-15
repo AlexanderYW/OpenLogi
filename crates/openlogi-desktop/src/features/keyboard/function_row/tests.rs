@@ -1,4 +1,4 @@
-use super::key_points::{KeyPoint, key_slots};
+use super::key_points::{KeyPoint, key_slots, photo_key_shape};
 use super::*;
 use openlogi_assets::{Assignment, Direction, ImageEntry, Metadata, Origin, Point};
 use openlogi_core::binding::{ButtonId, GridKey};
@@ -130,6 +130,55 @@ fn paging_markers_alone_leave_the_keypad_on_the_keycap_map() {
     assert_eq!(marked, key_slots(None, DeviceKind::Numpad));
 }
 
+/// Logi's own keypad depot marks no key, so the stock render carries the
+/// centres OpenLogi measured off it: every key the schematic shows, in the
+/// same order and binding the same targets, but on the photo — and on the
+/// keys the OpenLogi-authored markers name, two independent measurements of
+/// one render.
+#[test]
+fn the_stock_keypad_render_puts_every_key_on_the_photo() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+
+    let KeySurface::Photo(stock) =
+        key_surface(Some(&stock_keypad_asset((935, 1105))), DeviceKind::Numpad)
+    else {
+        panic!("the stock render maps the keys onto the photo");
+    };
+
+    let schematic = key_slots(None, DeviceKind::Numpad);
+    assert_eq!(
+        stock.iter().map(|slot| &slot.target).collect::<Vec<_>>(),
+        schematic
+            .iter()
+            .map(|slot| &slot.target)
+            .collect::<Vec<_>>(),
+    );
+    let marked = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+    // The draft's right paging marker sits ~6 px left of that key's centre,
+    // so the cross-check stops at the left paging key.
+    for (stock, marked) in stock.iter().zip(&marked).take(10) {
+        assert!(
+            (stock.point.x_frac - marked.point.x_frac).abs() < 0.005
+                && (stock.point.y_frac - marked.point.y_frac).abs() < 0.005,
+            "{} sits off its authored marker",
+            stock.legend
+        );
+    }
+}
+
+/// A re-staged render is not the one the keys were measured on: rather than
+/// land the keys off the physical ones, the keypad keeps its schematic.
+#[test]
+fn a_restaged_keypad_render_falls_back_to_the_keycap_map() {
+    let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
+    rust_i18n::set_locale("en");
+
+    let surface = key_surface(Some(&stock_keypad_asset((1057, 1227))), DeviceKind::Numpad);
+
+    assert!(matches!(surface, KeySurface::Keypad(_)));
+}
+
 /// The OpenLogi-authored c354 depot marks every key on the front render:
 /// the nine grid keys by `_g<index>` (wire order, row-major) and the two
 /// paging controls by their CIDs. Those caps go onto the render — positions
@@ -175,18 +224,21 @@ fn grid_markers_put_the_keypad_caps_on_the_photo() {
     );
 }
 
-/// The overlay caps must keep the render's gaps: at the authored positions
-/// and the render they were measured on, no two caps may overlap.
+/// The photo keys must keep the render's gaps: at the authored positions
+/// and the render they were measured on, no two keys may overlap.
 #[test]
-fn overlay_caps_stay_inside_the_keys_they_mark() {
+fn photo_keys_keep_the_render_gaps_between_them() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
     let render = (935., 1105.);
     let slots = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
 
     for (a, b) in slots.iter().zip(&slots[1..]) {
-        let (w1, h1) = overlay_cap(&a.target, render);
-        let (w2, h2) = overlay_cap(&b.target, render);
+        let (one, two) = (
+            photo_key_shape(&a.target, render.0),
+            photo_key_shape(&b.target, render.0),
+        );
+        let (w1, h1, w2, h2) = (one.w, one.h, two.w, two.h);
         let dx = (b.point.x_frac - a.point.x_frac).abs() * render.0;
         let dy = (b.point.y_frac - a.point.y_frac).abs() * render.1;
         assert!(
@@ -567,6 +619,16 @@ fn keypad_marker_asset() -> ResolvedAsset {
         },
         png_width: 935,
         png_height: 1105,
+    }
+}
+
+/// The keypad depot as Logi ships it: the front render, no key markers.
+fn stock_keypad_asset(png: (u32, u32)) -> ResolvedAsset {
+    ResolvedAsset {
+        metadata: Metadata { images: Vec::new() },
+        png_width: png.0,
+        png_height: png.1,
+        ..keypad_marker_asset()
     }
 }
 

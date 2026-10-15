@@ -12,10 +12,13 @@
 //! spacing. A keypad is never that keyboard — it carries no F-row at all.
 //! Where its depot marks the grid keys — by the `_g<index>` suffix, since
 //! the vendor report that carries their presses names no control ID — the
-//! caps sit on the device render. A markerless [`DeviceKind::Numpad`]
-//! therefore shows the device's own keys, the LCD grid keys and paging
-//! buttons, as the keycap layout the device model describes
-//! ([`KeyTarget::Grid`]), bound per device like any control.
+//! keys sit on the device render. Logi's own keypad depot marks none of
+//! them, so for the stock MX Creative Keypad render OpenLogi carries the key
+//! centres measured off that very render ([`stock_keypad_slots`]) and maps
+//! the keys onto it the same way. Any other markerless [`DeviceKind::Numpad`]
+//! shows the device's own keys, the LCD grid keys and paging buttons, as the
+//! keycap layout the device model describes ([`KeyTarget::Grid`]). Either
+//! way every key binds per device like any control.
 
 use std::collections::HashSet;
 
@@ -115,9 +118,10 @@ pub(super) struct KeySlotLayout {
 
 /// The keys the device presents, and the surface that draws them.
 pub(super) enum KeySurface {
-    /// The keyboard's photo with callout bubbles and leader lines — the
-    /// markers name the keys; without them the slots land on the evenly
-    /// spaced F-row band.
+    /// The device's photo with its keys placed on it: a keyboard's callout
+    /// bubbles and leader lines, or a keypad's keys drawn on the render —
+    /// the markers (or the stock keypad's measured centres) name the keys;
+    /// without them a keyboard's slots land on the evenly spaced F-row band.
     Photo(Vec<KeySlotLayout>),
     /// A keypad's own keycap map: every key binds this device, the
     /// positions come from the device model, and no photo participates.
@@ -133,10 +137,12 @@ impl KeySurface {
 }
 
 /// Which keys the tab shows, and where. A depot with control markers is
-/// the keyboard's own answer (photo path, kind or no kind); a markerless
-/// keypad is the device-model answer; any other markerless device falls
-/// back to the OS-hook F-row, which is genuinely that device's remappable
-/// surface only because a full keyboard really has that row.
+/// the keyboard's own answer (photo path, kind or no kind); a keypad goes on
+/// its render when the depot marks its grid or the render is the stock one
+/// OpenLogi measured, else onto the device-model keycap map; any other
+/// markerless device falls back to the OS-hook F-row, which is genuinely
+/// that device's remappable surface only because a full keyboard really has
+/// that row.
 pub(super) fn key_surface(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> KeySurface {
     if let Some(asset) = asset {
         let marked = marker_slots(asset, kind);
@@ -154,7 +160,8 @@ pub(super) fn key_surface(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> Ke
             }
         }
         if matches!(kind, DeviceKind::Numpad) {
-            return KeySurface::Keypad(keypad_slots());
+            return stock_keypad_slots(asset)
+                .map_or_else(|| KeySurface::Keypad(keypad_slots()), KeySurface::Photo);
         }
         if let Some(points) = legacy_pixel_key_points(asset) {
             return KeySurface::Photo(function_key_slots(points));
@@ -215,13 +222,12 @@ fn keycap_point(col: usize, row: usize) -> KeyPoint {
 /// row-major, then left and right paging under the first two grid columns
 /// as they sit on the chassis. Their identities are the ones OpenLogi
 /// binds by — grid positions, and the two controls catalogued for the
-/// keypad's paging feature.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "keypad cell indices are single digits"
-)]
-fn keypad_slots() -> Vec<KeySlotLayout> {
-    let (w, h) = keypad_canvas();
+/// keypad's paging feature — placed by `grid_point(row, col)` and
+/// `paging_point(col)`.
+fn keypad_layout(
+    grid_point: impl Fn(usize, usize) -> KeyPoint,
+    paging_point: impl Fn(usize) -> KeyPoint,
+) -> Vec<KeySlotLayout> {
     let mut slots: Vec<KeySlotLayout> = GridKey::ALL
         .iter()
         .map(|key| {
@@ -229,7 +235,7 @@ fn keypad_slots() -> Vec<KeySlotLayout> {
             KeySlotLayout {
                 legend: rust_i18n::t!(key.translation_key()).into_owned(),
                 target: KeyTarget::grid(*key),
-                point: keycap_point(col, row),
+                point: grid_point(row, col),
             }
         })
         .collect();
@@ -238,13 +244,132 @@ fn keypad_slots() -> Vec<KeySlotLayout> {
         slots.push(KeySlotLayout {
             legend: control_legend(button),
             target: KeyTarget::Control(button),
-            point: KeyPoint {
-                x_frac: ((col as f32) * (KEYCAP_W + KEYCAP_GAP) + KEYCAP_W / 2.0) / w,
-                y_frac: ((3.0 * (KEYCAP_H + KEYCAP_GAP) + KEYCAP_GAP + KEYCAP_PAGING_H / 2.0) / h),
-            },
+            point: paging_point(col),
         });
     }
     slots
+}
+
+/// The keypad's keys on the schematic keycap canvas.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "keypad cell indices are single digits"
+)]
+fn keypad_slots() -> Vec<KeySlotLayout> {
+    let (w, h) = keypad_canvas();
+    keypad_layout(
+        |row, col| keycap_point(col, row),
+        |col| KeyPoint {
+            x_frac: ((col as f32) * (KEYCAP_W + KEYCAP_GAP) + KEYCAP_W / 2.0) / w,
+            y_frac: (3.0 * (KEYCAP_H + KEYCAP_GAP) + KEYCAP_GAP + KEYCAP_PAGING_H / 2.0) / h,
+        },
+    )
+}
+
+/// The depot whose stock render [`stock_keypad_slots`] was measured on.
+const STOCK_KEYPAD_DEPOT: &str = "mx_creative_keypad";
+/// That render's size, `front_core.png`. A re-staged render of any other
+/// size is no longer the one measured, so the keys fall back to the
+/// schematic rather than landing off the keys.
+const STOCK_KEYPAD_RENDER: (u32, u32) = (935, 1105);
+/// Key centres on the stock render, in its pixels: the LCD grid's columns
+/// and rows, and the paging keys' row and columns.
+const STOCK_GRID_COLS_PX: [f32; 3] = [233., 471., 709.];
+const STOCK_GRID_ROWS_PX: [f32; 3] = [229., 467.5, 706.];
+const STOCK_PAGING_COLS_PX: [f32; 2] = [233., 473.];
+const STOCK_PAGING_ROW_PX: f32 = 906.5;
+
+/// A key's outline on the keypad render, in px of the render as drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct KeyShape {
+    pub(super) w: f32,
+    pub(super) h: f32,
+    /// Corner radii: top left, top right, bottom right, bottom left.
+    pub(super) radii: [f32; 4],
+}
+
+/// Key outlines on the stock render, in its pixels. Most corners are the
+/// keycaps' small radius; the chassis' own curve gives the grid's outer top
+/// corners and the paging keys' outer bottom corners a wide one.
+const GRID_KEY_PX: f32 = 200.;
+const PAGING_KEY_PX: (f32, f32) = (200., 127.);
+const KEY_CORNER_PX: f32 = 22.;
+const KEY_OUTER_CORNER_PX: f32 = 60.;
+const PAGING_TOP_CORNER_PX: f32 = 18.;
+const PAGING_INNER_CORNER_PX: f32 = 24.;
+const PAGING_OUTER_CORNER_PX: f32 = 55.;
+
+/// The outline of the key `target` names on a keypad render `render_w` px
+/// wide — the stock render's measured key, scaled to the drawn render.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "render dimensions are a few thousand pixels at most"
+)]
+pub(super) fn photo_key_shape(target: &KeyTarget, render_w: f32) -> KeyShape {
+    let (k, outer) = (KEY_CORNER_PX, KEY_OUTER_CORNER_PX);
+    let ((w, h), radii) = match target {
+        KeyTarget::Grid(slot) => (
+            (GRID_KEY_PX, GRID_KEY_PX),
+            match slot.key {
+                GridKey::TopLeft => [outer, k, k, k],
+                GridKey::TopRight => [k, outer, k, k],
+                _ => [k; 4],
+            },
+        ),
+        KeyTarget::Control(button) if button.cid() == Some(Cid::LEFT_PAGING) => (
+            PAGING_KEY_PX,
+            [
+                PAGING_TOP_CORNER_PX,
+                PAGING_TOP_CORNER_PX,
+                PAGING_INNER_CORNER_PX,
+                PAGING_OUTER_CORNER_PX,
+            ],
+        ),
+        KeyTarget::Control(button) if button.cid() == Some(Cid::RIGHT_PAGING) => (
+            PAGING_KEY_PX,
+            [
+                PAGING_TOP_CORNER_PX,
+                PAGING_TOP_CORNER_PX,
+                PAGING_OUTER_CORNER_PX,
+                PAGING_INNER_CORNER_PX,
+            ],
+        ),
+        KeyTarget::Control(_) | KeyTarget::FunctionKey(_) => ((GRID_KEY_PX, GRID_KEY_PX), [k; 4]),
+    };
+    let scale = render_w / STOCK_KEYPAD_RENDER.0 as f32;
+    KeyShape {
+        w: w * scale,
+        h: h * scale,
+        radii: radii.map(|r| r * scale),
+    }
+}
+
+/// The MX Creative Keypad's keys on its stock render, or `None` when
+/// `asset` is not that render. Logi's depot marks none of the keypad's keys
+/// — Options+ lays them out itself — so OpenLogi carries their centres,
+/// measured off the render the tab shows, the way a marked depot would
+/// place them.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "render dimensions are a few thousand pixels at most"
+)]
+fn stock_keypad_slots(asset: &ResolvedAsset) -> Option<Vec<KeySlotLayout>> {
+    if asset.depot != STOCK_KEYPAD_DEPOT
+        || (asset.png_width, asset.png_height) != STOCK_KEYPAD_RENDER
+    {
+        return None;
+    }
+    let (w, h) = (STOCK_KEYPAD_RENDER.0 as f32, STOCK_KEYPAD_RENDER.1 as f32);
+    Some(keypad_layout(
+        |row, col| KeyPoint {
+            x_frac: STOCK_GRID_COLS_PX[col] / w,
+            y_frac: STOCK_GRID_ROWS_PX[row] / h,
+        },
+        |col| KeyPoint {
+            x_frac: STOCK_PAGING_COLS_PX[col] / w,
+            y_frac: STOCK_PAGING_ROW_PX / h,
+        },
+    ))
 }
 
 /// The depot's marked keys as key slots, each named by what its slot ID
