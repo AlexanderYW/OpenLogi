@@ -103,3 +103,45 @@ fn removing_a_page_drops_its_bindings_and_keeps_the_rest() {
             .contains_key(&ButtonId::Control(Cid::LEFT_PAGING))
     );
 }
+
+#[test]
+fn an_app_profile_binds_keypad_keys_over_default() {
+    let (mut state, _receiver) = keypad_state();
+    assert!(state.current_device_is_persistent());
+    let _ = state.commit_keypad_pages(page(2));
+    let _ = state.commit_binding(slot(2, GridKey::Middle), Action::Copy);
+
+    let _ = state.set_editing_app(Some("com.adobe.Photoshop".into()));
+    assert_eq!(
+        state.button_bindings().get(&slot(2, GridKey::Middle)),
+        Some(&Action::Copy),
+        "an app profile inherits Default's keys"
+    );
+    let _ = state.commit_binding(slot(2, GridKey::Middle), Action::Paste);
+    assert_eq!(
+        state.button_bindings().get(&slot(2, GridKey::Middle)),
+        Some(&Action::Paste)
+    );
+    assert_eq!(state.app_profiles().count(), 1);
+
+    let _ = state.set_editing_app(None);
+    assert_eq!(
+        state.button_bindings().get(&slot(2, GridKey::Middle)),
+        Some(&Action::Copy),
+        "Default keeps its own key"
+    );
+}
+
+#[test]
+fn a_page_bound_only_in_an_app_profile_still_counts_as_bound() {
+    let (mut state, _receiver) = keypad_state();
+    let _ = state.commit_keypad_pages(page(2));
+    assert!(!state.current_keypad_page_binds(page(2)));
+
+    let _ = state.set_editing_app(Some("com.adobe.Photoshop".into()));
+    let _ = state.commit_binding(slot(2, GridKey::TopLeft), Action::Cut);
+    let _ = state.set_editing_app(None);
+
+    // Default binds nothing there, yet removing page 2 would drop the app's key.
+    assert!(state.current_keypad_page_binds(page(2)));
+}
