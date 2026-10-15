@@ -802,11 +802,13 @@ fn keyboard_spec_never_diverts_reserved_controls() {
     );
 }
 
+/// The registry's MX Creative Keypad, wired: a route the LCD lookup knows.
 fn wired_keypad(key: &str, online: bool) -> AgentDevice {
+    let keypad = &openlogi_device_registry::keypad::KEYPADS[0];
     AgentDevice {
         route: Some(DeviceRoute::Direct {
-            vendor_id: 0x046d,
-            product_id: 0xc354,
+            vendor_id: keypad.vendor_id,
+            product_id: keypad.product_id,
         }),
         slot: DIRECT_DEVICE_INDEX,
         kind: DeviceKind::Numpad,
