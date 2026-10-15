@@ -422,6 +422,7 @@ fn action_ring_types() {
     assert_wire(&HidppOperation::WriteReportRate, "14");
     assert_wire(&HidppOperation::ReadBrightness, "17");
     assert_wire(&HidppOperation::WriteBrightness, "18");
+    assert_wire(&HidppOperation::WriteKeyImage, "19");
 }
 
 #[test]

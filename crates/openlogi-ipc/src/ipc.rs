@@ -114,7 +114,8 @@ pub use succession::Identity;
 ///      `Capabilities::brightness`,
 ///      `Agent::{read_brightness, set_brightness}` and
 ///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
-///      `0x8040` device brightness.
+///      `0x8040` device brightness; `HidppOperation::WriteKeyImage` appended —
+///      an image written to one of the MX Creative Keypad's LCD keys.
 pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Environment variable through which the agent hands a supervised helper the
