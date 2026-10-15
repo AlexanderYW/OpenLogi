@@ -315,25 +315,6 @@ fn semantic_read_requests() {
         },
         "23000846303044434146450101044465736b",
     );
-    assert_wire(
-        &AgentRequest::ReadBrightness {
-            route: DeviceRoute::Bolt {
-                receiver_uid: "F00DCAFE".into(),
-                slot: 1,
-            },
-        },
-        "240008463030444341464501",
-    );
-    assert_wire(
-        &AgentRequest::SetBrightness {
-            route: DeviceRoute::Bolt {
-                receiver_uid: "F00DCAFE".into(),
-                slot: 1,
-            },
-            level: 50,
-        },
-        "25000846303044434146450132",
-    );
 }
 
 /// After a save, the GUI names the revision of the file it wrote, as the 32
@@ -425,6 +406,29 @@ fn action_ring_types() {
     assert_wire(&HidppOperation::ReadBrightness, "17");
     assert_wire(&HidppOperation::WriteBrightness, "18");
     assert_wire(&HidppOperation::WriteKeyImage, "19");
+}
+
+#[test]
+fn brightness_requests() {
+    assert_wire(
+        &AgentRequest::ReadBrightness {
+            route: DeviceRoute::Bolt {
+                receiver_uid: "F00DCAFE".into(),
+                slot: 1,
+            },
+        },
+        "240008463030444341464501",
+    );
+    assert_wire(
+        &AgentRequest::SetBrightness {
+            route: DeviceRoute::Bolt {
+                receiver_uid: "F00DCAFE".into(),
+                slot: 1,
+            },
+            level: 50,
+        },
+        "25000846303044434146450132",
+    );
 }
 
 /// The keypad page actions are appended `Action` variants, and a later page's
