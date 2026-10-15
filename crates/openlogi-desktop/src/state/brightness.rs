@@ -108,13 +108,11 @@ impl AppState {
     }
 
     pub(super) fn load_current_brightness(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.current_brightness_supported() {
+            return;
+        }
         let Some((key, route)) = self
             .current_record()
-            .filter(|record| {
-                record
-                    .capabilities
-                    .is_some_and(|capabilities| capabilities.brightness)
-            })
             .and_then(|record| Some((record.device_key(), record.route.clone()?)))
         else {
             return;
