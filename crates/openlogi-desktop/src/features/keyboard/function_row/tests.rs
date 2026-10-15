@@ -1,7 +1,7 @@
 use super::key_points::{KeyPoint, key_slots, photo_key_shape};
 use super::*;
 use openlogi_assets::{Assignment, Direction, ImageEntry, Metadata, Origin, Point};
-use openlogi_core::binding::{ButtonId, GridKey};
+use openlogi_core::binding::{ButtonId, Cid, GridKey};
 use openlogi_core::config::FunctionKey;
 use openlogi_core::device::DeviceKind;
 use std::path::PathBuf;
