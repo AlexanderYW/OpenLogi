@@ -897,9 +897,10 @@ impl Agent for MockAgent {
         let mut state = self.state.lock().await;
         let settings = state.settings_for_mut(&route)?;
         let stored = profile_value_mut(&mut settings.brightness, &route, 0x8040)?;
-        // The scripted device clamps like firmware does; the echoed state is
-        // the applied value, never the requested one.
-        stored.level = level.clamp(stored.min, stored.max);
+        // The scripted device takes what the real device layer would write —
+        // the writable range, never 0 — and echoes the applied value, never
+        // the requested one.
+        stored.level = stored.writable().clamp(level);
         info!(%route, level = stored.level, "set_brightness");
         Ok(*stored)
     }
