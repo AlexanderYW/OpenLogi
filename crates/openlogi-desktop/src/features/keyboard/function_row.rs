@@ -406,7 +406,7 @@ fn bound_action(state: &AppState, target: &KeyTarget) -> Option<Action> {
             .cloned(),
         KeyTarget::Grid(key) => state
             .button_bindings()
-            .get(&ButtonId::Grid(*key))
+            .get(&ButtonId::grid(*key))
             .filter(|action| **action != Action::None)
             .cloned(),
         KeyTarget::FunctionKey(trigger) => state.keyboard_bindings().get(trigger).cloned(),
@@ -425,7 +425,7 @@ pub(super) fn commit_key_action(
     match target {
         KeyTarget::Control(button) => state.commit_binding(*button, action.unwrap_or(Action::None)),
         KeyTarget::Grid(key) => {
-            state.commit_binding(ButtonId::Grid(*key), action.unwrap_or(Action::None))
+            state.commit_binding(ButtonId::grid(*key), action.unwrap_or(Action::None))
         }
         KeyTarget::FunctionKey(trigger) => state.commit_keyboard_binding(trigger.clone(), action),
     }

@@ -13,7 +13,7 @@ use super::{
     ThumbwheelSensitivity,
 };
 use crate::binding::{
-    ActionRingConfig, ActionRingIcon, ActionRingSlot, Binding, ButtonId, RingAction,
+    ActionRingConfig, ActionRingIcon, ActionRingSlot, Binding, ButtonId, KeypadPage, RingAction,
 };
 use crate::hid::{Dpi, PointerSpeed, ReportRate};
 
@@ -405,6 +405,29 @@ impl Config {
             .entry(device_key.to_string())
             .or_default()
             .enabled = enabled;
+    }
+
+    /// The last of `device_key`'s keypad binding pages — its page count.
+    /// One page for any device that never had more.
+    #[must_use]
+    pub fn keypad_pages(&self, device_key: &str) -> KeypadPage {
+        self.devices
+            .get(device_key)
+            .map_or(KeypadPage::FIRST, |device| device.keypad_pages)
+    }
+
+    /// Give `device_key` pages `1..=last`. Shrinking drops every grid binding
+    /// on a removed page — device-wide and in each per-app overlay — so a
+    /// page re-added later starts empty instead of resurrecting old keys.
+    pub fn set_keypad_pages(&mut self, device_key: &str, last: KeypadPage) {
+        let device = self.devices.entry(device_key.to_string()).or_default();
+        device.keypad_pages = last;
+        let kept = |button: &ButtonId| button.grid_slot().is_none_or(|slot| slot.page <= last);
+        device.bindings.retain(|button, _| kept(button));
+        device.disabled_gestures.retain(|button, _| kept(button));
+        for overlay in device.per_app_bindings.values_mut() {
+            overlay.retain(|button, _| kept(button));
+        }
     }
 
     /// The effective thumb-wheel sensitivity for `device_key`: the device's
