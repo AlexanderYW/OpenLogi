@@ -404,10 +404,12 @@ fn require_same_structural_route(expected: &DeviceRoute, actual: &DeviceRoute) -
             DeviceRoute::Direct {
                 vendor_id: left_vendor,
                 product_id: left_product,
+                ..
             },
             DeviceRoute::Direct {
                 vendor_id: right_vendor,
                 product_id: right_product,
+                ..
             },
         ) => left_vendor == right_vendor && left_product == right_product,
         (
@@ -587,6 +589,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: profile.inventories[1].receiver.vendor_id,
             product_id: profile.inventories[1].receiver.product_id,
+            identity: None,
         };
         let model = profile.inventories[1].paired[0]
             .model_info

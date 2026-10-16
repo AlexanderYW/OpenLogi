@@ -219,6 +219,7 @@ mod tests {
             route: DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc539,
+                identity: None,
             },
             name: name.to_string(),
         }
@@ -305,6 +306,7 @@ mod tests {
             DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc095,
+                identity: None,
             }
         );
         assert_eq!(candidates[0].route.device_index(), DIRECT_DEVICE_INDEX);

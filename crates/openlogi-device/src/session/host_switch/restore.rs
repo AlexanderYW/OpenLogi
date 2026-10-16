@@ -162,6 +162,7 @@ mod tests {
             let route = DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb35b,
+                identity: None,
             };
             let node = NodeId::from("host-keyboard".to_owned());
             let registry = ChannelRegistry::default();
@@ -245,6 +246,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let registry = ChannelRegistry::default();
         let (raw, _) = ScriptedRawHidChannel::with_responder(|_| None);
@@ -266,6 +268,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let registry = ChannelRegistry::default();
         let (raw, _) = ScriptedRawHidChannel::with_responder(|_| None);
@@ -325,6 +328,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let node = NodeId::from("keyboard-node".to_owned());
         let registry = ChannelRegistry::default();
