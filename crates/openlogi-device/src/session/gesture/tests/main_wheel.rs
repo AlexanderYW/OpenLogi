@@ -386,6 +386,7 @@ async fn restore_outcome(armed: Armed) -> (CaptureSessionOutcome, ReplayChannelH
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     };
     let registry = ChannelRegistry::default();
     registry.replace_node(

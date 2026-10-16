@@ -220,6 +220,7 @@ fn profile_validator_rejects_route_and_setting_inconsistencies() {
     missing_route.settings[0].route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xffff,
+        identity: None,
     };
     let error = missing_route
         .validate()
@@ -594,6 +595,7 @@ async fn pointer_scaling_write_returns_readback_instead_of_request_echo() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     };
     let exchanges = vec![
         h20(
@@ -739,6 +741,7 @@ fn direct_probe_fixture() -> SyntheticFixture {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id,
+        identity: None,
     };
     let profile = DeviceProfile {
         schema_version: FIXTURE_SCHEMA_VERSION,

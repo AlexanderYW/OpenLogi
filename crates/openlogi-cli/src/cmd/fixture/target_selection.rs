@@ -71,6 +71,7 @@ fn safe_route_label(route: &DeviceRoute) -> String {
         DeviceRoute::Direct {
             vendor_id,
             product_id,
+            ..
         } => format!("direct {vendor_id:04x}:{product_id:04x}"),
         DeviceRoute::RawHid {
             vendor_id,

@@ -57,6 +57,7 @@ pub(crate) async fn open_route_channel(
         if let DeviceRoute::Direct {
             vendor_id,
             product_id,
+            ..
         } = route
             && (node.vendor_id != *vendor_id || node.product_id != *product_id)
         {

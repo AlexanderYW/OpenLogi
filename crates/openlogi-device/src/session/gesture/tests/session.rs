@@ -157,6 +157,7 @@ async fn pending_restore_waits_for_a_replacement_then_undiverts_through_it() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     };
     let (retired_raw, retired_handle) = ScriptedRawHidChannel::with_responder(|_| None);
     let retired_channel = scripted_channel(retired_raw).await;
@@ -402,6 +403,7 @@ async fn restore_retries_when_inventory_changes_during_an_awaited_write() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     };
     let registry = ChannelRegistry::default();
     let node = NodeId::from("mouse-node".to_owned());
@@ -461,6 +463,7 @@ async fn failed_setup_rollback_returns_its_restore_capability() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     };
     let (raw, handle) =
         ScriptedRawHidChannel::with_failing_writes(|request| Some(request.to_vec()), |_| true);
@@ -542,6 +545,7 @@ async fn channel_change_takes_teardown_precedence_over_ready_shutdown() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     };
     let registry = ChannelRegistry::default();
     let node = NodeId::from("mouse-node".to_owned());
@@ -601,6 +605,7 @@ async fn arm_then_restore_thumbwheel(status: [u8; 2]) -> Vec<[u8; 2]> {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     };
     let (raw, handle) = thumbwheel_device(status);
     let channel = scripted_channel(raw).await;
