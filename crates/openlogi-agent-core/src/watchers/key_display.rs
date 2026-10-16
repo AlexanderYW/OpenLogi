@@ -47,12 +47,10 @@ pub struct KeyDisplaySpec {
 /// Read-only, coalescing view of the published key-display specs.
 pub type SharedKeyDisplaySpecs = watch::Receiver<Arc<Vec<KeyDisplaySpec>>>;
 
-/// One key to paint.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Paint {
-    route: DeviceRoute,
-    display: KeyDisplay,
-    generation: u64,
+/// One key to paint, on the panel `spec` describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Paint<'a> {
+    spec: &'a KeyDisplaySpec,
     key: GridKey,
     face: KeyFace,
 }
@@ -65,12 +63,14 @@ struct PaintedPanel {
     faces: BTreeMap<GridKey, KeyFace>,
 }
 
-/// What the watcher believes is on every panel it has painted — the
-/// sans-I/O half of the watcher. Only [`Self::record`] adds to it, and only
-/// for a write the device acknowledged.
+/// What the watcher believes is on every panel it has painted, and which
+/// panels are refusing writes — the sans-I/O half of the watcher. Only
+/// [`Self::record`] adds a painted face, and only for a write the device
+/// acknowledged.
 #[derive(Debug, Default)]
 struct Painted {
     panels: Vec<PaintedPanel>,
+    failing: Vec<DeviceRoute>,
 }
 
 impl Painted {
@@ -79,12 +79,17 @@ impl Painted {
     /// Forgets a panel that left `specs` (it may come back showing anything)
     /// and one whose generation moved (it may have reset), so both are
     /// repainted in full.
-    fn plan(&mut self, specs: &[KeyDisplaySpec]) -> Vec<Paint> {
+    ///
+    /// Also forgets that a panel which left `specs` was failing: one that
+    /// comes back is new.
+    fn plan<'a>(&mut self, specs: &'a [KeyDisplaySpec]) -> Vec<Paint<'a>> {
         self.panels.retain(|panel| {
             specs
                 .iter()
                 .any(|spec| spec.route == panel.route && spec.generation == panel.generation)
         });
+        self.failing
+            .retain(|failing| specs.iter().any(|spec| &spec.route == failing));
         specs
             .iter()
             .flat_map(|spec| {
@@ -98,10 +103,8 @@ impl Painted {
                     .filter(move |(key, face)| {
                         painted.and_then(|faces| faces.get(key)) != Some(face)
                     })
-                    .map(|(key, face)| Paint {
-                        route: spec.route.clone(),
-                        display: spec.display,
-                        generation: spec.generation,
+                    .map(move |(key, face)| Paint {
+                        spec,
                         key: *key,
                         face: *face,
                     })
@@ -109,54 +112,43 @@ impl Painted {
             .collect()
     }
 
-    /// Note that the device acknowledged `paint`.
+    /// Note that the device acknowledged `paint`, so its panel is not
+    /// failing.
     fn record(&mut self, paint: &Paint) {
+        let spec = paint.spec;
+        self.failing.retain(|failing| failing != &spec.route);
         match self
             .panels
             .iter_mut()
-            .find(|panel| panel.route == paint.route)
+            .find(|panel| panel.route == spec.route)
         {
-            Some(panel) if panel.generation == paint.generation => {
+            Some(panel) if panel.generation == spec.generation => {
                 panel.faces.insert(paint.key, paint.face);
             }
             // A newer generation was planned meanwhile: this paint predates a
             // reset, so it proves nothing about the panel now.
             Some(_) => {}
             None => self.panels.push(PaintedPanel {
-                route: paint.route.clone(),
-                generation: paint.generation,
+                route: spec.route.clone(),
+                generation: spec.generation,
                 faces: BTreeMap::from([(paint.key, paint.face)]),
             }),
         }
     }
-}
 
-/// The keypads whose last image write failed, so a device that keeps
-/// refusing is reported once at `warn` rather than at every retry.
-#[derive(Debug, Default)]
-struct Failing {
-    routes: Vec<DeviceRoute>,
-}
-
-impl Failing {
-    /// Forget keypads that left `specs`: one that comes back is new.
-    fn retain(&mut self, specs: &[KeyDisplaySpec]) {
-        self.routes
-            .retain(|route| specs.iter().any(|spec| &spec.route == route));
-    }
-
-    /// Note a failed write on `route`; `true` when it was not already failing.
+    /// Note a failed write on `route`; `true` when the panel was not already
+    /// failing, so the failure is news worth a `warn`.
     fn failed(&mut self, route: &DeviceRoute) -> bool {
-        if self.routes.contains(route) {
+        if self.failing.contains(route) {
             return false;
         }
-        self.routes.push(route.clone());
+        self.failing.push(route.clone());
         true
     }
 
-    /// Note an acknowledged write on `route`.
-    fn succeeded(&mut self, route: &DeviceRoute) {
-        self.routes.retain(|failing| failing != route);
+    /// Whether any panel's last write failed and should be retried.
+    fn is_failing(&self) -> bool {
+        !self.failing.is_empty()
     }
 }
 
@@ -194,17 +186,14 @@ async fn manage(
 ) -> ManagerCompletion {
     let mut painted = Painted::default();
     let mut tiles = Tiles::default();
-    let mut failing = Failing::default();
     loop {
         let wanted = Arc::clone(&specs.borrow_and_update());
         let pending = painted.plan(&wanted);
-        failing.retain(&wanted);
-        let retry = tokio::select! {
-            failed = paint_all(&pending, &mut painted, &mut failing, &mut tiles, &access) => {
-                failed.then(|| Instant::now() + RETRY_DELAY)
-            }
+        tokio::select! {
+            () = paint_all(&pending, &mut painted, &mut tiles, &access) => {}
             _ = &mut shutdown => return ManagerCompletion::Graceful,
-        };
+        }
+        let retry = painted.is_failing().then(|| Instant::now() + RETRY_DELAY);
         tokio::select! {
             changed = specs.changed() => {
                 if changed.is_err() {
@@ -217,25 +206,25 @@ async fn manage(
     }
 }
 
-/// Paint every key in `pending`, recording each acknowledged one. Returns
-/// whether any write failed and should be retried.
+/// Paint every key in `pending`, recording each acknowledged one and each
+/// keypad whose write failed.
 ///
 /// The first failed write on a keypad skips that keypad's remaining keys: a
 /// device that did not answer one tile will not answer the next, and each
 /// would wait out its own acknowledgement timeout.
 async fn paint_all(
-    pending: &[Paint],
+    pending: &[Paint<'_>],
     painted: &mut Painted,
-    failing: &mut Failing,
     tiles: &mut Tiles,
     access: &DeviceAccess,
-) -> bool {
+) {
     let mut failed: Vec<&DeviceRoute> = Vec::new();
     for paint in pending {
-        if failed.contains(&&paint.route) {
+        let route = &paint.spec.route;
+        if failed.contains(&route) {
             continue;
         }
-        let tile = match tiles.get(paint.face, paint.display.key_size) {
+        let tile = match tiles.get(paint.face, paint.spec.display.key_size) {
             Ok(tile) => tile,
             Err(error) => {
                 // A defect in the artwork, not the device: retrying cannot
@@ -244,29 +233,25 @@ async fn paint_all(
                 continue;
             }
         };
-        let (display, key) = (paint.display, paint.key);
+        let (display, key) = (paint.spec.display, paint.key);
         let result = access
-            .op(&paint.route)
+            .op(route)
             .run(HidppOperation::WriteKeyImage, |channel| async move {
                 write_key_image_on(&channel, display, key, &tile).await
             })
             .await;
         match result {
-            Ok(()) => {
-                painted.record(paint);
-                failing.succeeded(&paint.route);
-            }
+            Ok(()) => painted.record(paint),
             Err(error) => {
-                if failing.failed(&paint.route) {
-                    warn!(%error, route = %paint.route, key = ?paint.key, "key image write failed — retrying");
+                if painted.failed(route) {
+                    warn!(%error, %route, key = ?paint.key, "key image write failed — retrying");
                 } else {
-                    debug!(%error, route = %paint.route, key = ?paint.key, "key image write failed again — retrying");
+                    debug!(%error, %route, key = ?paint.key, "key image write failed again — retrying");
                 }
-                failed.push(&paint.route);
+                failed.push(route);
             }
         }
     }
-    !failed.is_empty()
 }
 
 #[cfg(test)]
