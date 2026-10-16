@@ -122,6 +122,11 @@ release = false
 publish = false
 
 [[package]]
+name = "openlogi-action-icons"
+release = false
+publish = false
+
+[[package]]
 name = "openlogi-permissions"
 release = false
 publish = false
