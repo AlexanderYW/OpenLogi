@@ -44,7 +44,7 @@ openlogi fixture contribute \
   only its own profile, and does not exclude Options+ or other direct diagnostics.
 - Let the recorder hold `agent.lock` and reject an active or unhealthy IPC endpoint.
   Do not delete locks, bypass ownership checks, or change profiles to evade them.
-- The current wizard records eight named read operations. Discovery can first
+- The current wizard records nine named read operations. Discovery can first
   enable receiver notifications and request arrival reports; flags are not restored.
   Do not describe the session as zero-write. Do not add setting writes or pairing.
 - Prefer the wizard over hand-built manifests. Use lower-level `fixture record`

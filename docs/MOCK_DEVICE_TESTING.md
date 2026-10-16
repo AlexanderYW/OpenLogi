@@ -431,7 +431,7 @@ and is not an ambient sniffer.
 Before enumerating hardware, raw fixture capture acquires the same profile's
 `agent.lock` used by agent startup, then checks that the IPC endpoint is
 unreachable. The selected target holds the lock for the entire capture, including
-all eight cases in the contribution wizard. This excludes agent relaunches and
+all nine cases in the contribution wizard. This excludes agent relaunches and
 other fixture captures until completion; errors, cancellation, and process exit
 release the lock. It does not exclude Options+ or other direct diagnostic tools.
 
@@ -455,7 +455,7 @@ It never stores the selector, original receiver identity, node path, hashes,
 timestamps, or contributor identity.
 
 For HID++ devices, stop the Agent and rerun the same command. The CLI confirms
-the same transport kind and receiver slot (or direct VID/PID), records all eight
+the same transport kind and receiver slot (or direct VID/PID), records all nine
 supported read-only operation cases, self-replays every candidate, and generates
 `manifest.json` from the finalized profile and cassettes. Manifest generation
 re-extracts exact identity occurrences; it does not trust sanitizer audit
