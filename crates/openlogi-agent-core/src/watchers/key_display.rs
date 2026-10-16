@@ -10,9 +10,17 @@
 //!
 //! The images are volatile panel state with nothing to restore: a stop
 //! simply abandons any write in flight.
+//!
+//! A keypad whose write fails is left alone until its own retry deadline,
+//! which doubles with each further failure up to [`MAX_RETRY_DELAY`]: a node
+//! that refuses the image report outright (one that does not declare it)
+//! fails the same way every time, so neither the timer nor a respec — an app
+//! switch, a rebind — may hammer it. A reconnect or a wake (a moved
+//! generation) clears its failure and retries at once.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
 use openlogi_core::binding::GridKey;
 use openlogi_hid::{DeviceRoute, HidppOperation, KeyDisplay, KeyImageJpeg, write_key_image_on};
@@ -20,7 +28,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
-use super::retry::{RETRY_DELAY, wait_for_deadline};
+use super::retry::{Backoff, RETRY_DELAY, wait_for_deadline};
 use super::shutdown::{ManagerCompletion, WatcherHandle};
 use crate::hardware::DeviceAccess;
 
@@ -47,6 +55,9 @@ pub struct KeyDisplaySpec {
 /// Read-only, coalescing view of the published key-display specs.
 pub type SharedKeyDisplaySpecs = watch::Receiver<Arc<Vec<KeyDisplaySpec>>>;
 
+/// The longest a failing keypad waits between write attempts.
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
+
 /// One key to paint, on the panel `spec` describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Paint<'a> {
@@ -63,6 +74,16 @@ struct PaintedPanel {
     faces: BTreeMap<GridKey, KeyFace>,
 }
 
+/// A keypad whose image writes keep failing, and when to try it again.
+#[derive(Debug)]
+struct FailingPanel {
+    route: DeviceRoute,
+    /// The generation the failures happened in: a moved one clears them.
+    generation: u64,
+    backoff: Backoff,
+    retry_at: Instant,
+}
+
 /// What the watcher believes is on every panel it has painted, and which
 /// panels are refusing writes — the sans-I/O half of the watcher. Only
 /// [`Self::record`] adds a painted face, and only for a write the device
@@ -70,7 +91,7 @@ struct PaintedPanel {
 #[derive(Debug, Default)]
 struct Painted {
     panels: Vec<PaintedPanel>,
-    failing: Vec<DeviceRoute>,
+    failing: Vec<FailingPanel>,
 }
 
 impl Painted {
@@ -80,18 +101,28 @@ impl Painted {
     /// and one whose generation moved (it may have reset), so both are
     /// repainted in full.
     ///
-    /// Also forgets that a panel which left `specs` was failing: one that
-    /// comes back is new.
-    fn plan<'a>(&mut self, specs: &'a [KeyDisplaySpec]) -> Vec<Paint<'a>> {
+    /// Leaves out every key of a failing panel whose retry deadline is after
+    /// `now`, and forgets the failures of a panel that left `specs` or whose
+    /// generation moved: either is a new device as far as retries go.
+    fn plan<'a>(&mut self, specs: &'a [KeyDisplaySpec], now: Instant) -> Vec<Paint<'a>> {
         self.panels.retain(|panel| {
             specs
                 .iter()
                 .any(|spec| spec.route == panel.route && spec.generation == panel.generation)
         });
-        self.failing
-            .retain(|failing| specs.iter().any(|spec| &spec.route == failing));
+        self.failing.retain(|failing| {
+            specs
+                .iter()
+                .any(|spec| spec.route == failing.route && spec.generation == failing.generation)
+        });
         specs
             .iter()
+            .filter(|spec| {
+                !self
+                    .failing
+                    .iter()
+                    .any(|failing| failing.route == spec.route && failing.retry_at > now)
+            })
             .flat_map(|spec| {
                 let painted = self
                     .panels
@@ -116,7 +147,7 @@ impl Painted {
     /// failing.
     fn record(&mut self, paint: &Paint) {
         let spec = paint.spec;
-        self.failing.retain(|failing| failing != &spec.route);
+        self.failing.retain(|failing| failing.route != spec.route);
         match self
             .panels
             .iter_mut()
@@ -136,19 +167,33 @@ impl Painted {
         }
     }
 
-    /// Note a failed write on `route`; `true` when the panel was not already
-    /// failing, so the failure is news worth a `warn`.
-    fn failed(&mut self, route: &DeviceRoute) -> bool {
-        if self.failing.contains(route) {
+    /// Note at `now` a failed write to the panel `spec` describes, and push
+    /// its retry deadline out by its backoff. `true` when the panel was not
+    /// already failing, so the failure is news worth a `warn`.
+    fn failed(&mut self, spec: &KeyDisplaySpec, now: Instant) -> bool {
+        if let Some(failing) = self
+            .failing
+            .iter_mut()
+            .find(|failing| failing.route == spec.route)
+        {
+            failing.backoff.failed();
+            failing.retry_at = now + failing.backoff.delay();
             return false;
         }
-        self.failing.push(route.clone());
+        let backoff = Backoff::new(RETRY_DELAY, MAX_RETRY_DELAY);
+        self.failing.push(FailingPanel {
+            route: spec.route.clone(),
+            generation: spec.generation,
+            backoff,
+            retry_at: now + backoff.delay(),
+        });
         true
     }
 
-    /// Whether any panel's last write failed and should be retried.
-    fn is_failing(&self) -> bool {
-        !self.failing.is_empty()
+    /// The earliest retry deadline of a failing panel, or `None` when none
+    /// is failing.
+    fn next_retry(&self) -> Option<Instant> {
+        self.failing.iter().map(|failing| failing.retry_at).min()
     }
 }
 
@@ -207,12 +252,12 @@ async fn manage(
     let mut tiles = Tiles::default();
     loop {
         let wanted = Arc::clone(&specs.borrow_and_update());
-        let pending = painted.plan(&wanted);
+        let pending = painted.plan(&wanted, Instant::now());
         tokio::select! {
             () = paint_all(&pending, &mut painted, &mut tiles, &access) => {}
             _ = &mut shutdown => return ManagerCompletion::Graceful,
         }
-        let retry = painted.is_failing().then(|| Instant::now() + RETRY_DELAY);
+        let retry = painted.next_retry();
         tokio::select! {
             changed = specs.changed() => {
                 if changed.is_err() {
@@ -256,7 +301,7 @@ async fn paint_all(
         match result {
             Ok(()) => painted.record(paint),
             Err(error) => {
-                if painted.failed(route) {
+                if painted.failed(paint.spec, Instant::now()) {
                     warn!(%error, %route, key = ?paint.key, "key image write failed — retrying");
                 } else {
                     debug!(%error, %route, key = ?paint.key, "key image write failed again — retrying");
