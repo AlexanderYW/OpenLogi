@@ -212,12 +212,19 @@ pub(super) struct TargetCandidate {
 /// A selected target holding agent ownership until all direct capture is done.
 pub(super) struct CaptureTarget {
     target: TargetCandidate,
+    /// Routes of every other online candidate seen when the target was chosen.
+    peers: Vec<DeviceRoute>,
     _agent_guard: InstanceGuard,
 }
 
 impl CaptureTarget {
     pub(super) fn route(&self) -> &DeviceRoute {
         &self.target.route
+    }
+
+    /// Routes of the other online candidates present at selection.
+    pub(super) fn peer_routes(&self) -> &[DeviceRoute] {
+        &self.peers
     }
 }
 
@@ -285,8 +292,14 @@ pub(super) async fn prepare_contribution_target(selector: Option<&str>) -> Resul
         .map_err(|_| anyhow!("failed to enumerate HID++ devices for direct fixture capture"))?;
     let candidates = online_targets(&inventories);
     let target = target_selection::select_target(&candidates, selector)?;
+    let peers = candidates
+        .into_iter()
+        .map(|candidate| candidate.route)
+        .filter(|route| *route != target.route)
+        .collect();
     Ok(CaptureTarget {
         target,
+        peers,
         _agent_guard: agent_guard,
     })
 }
@@ -468,6 +481,42 @@ mod tests {
             .expect_err("rendered routes require an exact match");
     }
 
+    /// Two identical keypads share a name and a privacy-safe label, so the
+    /// candidate list shows each one's full route — the exact `--device`
+    /// value that picks it. A lone device keeps the safe label.
+    #[test]
+    fn identical_devices_list_the_route_that_selects_each_one() {
+        let keypad = |unit| TargetCandidate {
+            route: DeviceRoute::Direct {
+                vendor_id: 0x046d,
+                product_id: 0xc354,
+                identity: Some(openlogi_core::device_order::DeviceIdentity::Unit([
+                    0x4f, 0x4c, 0x44, unit,
+                ])),
+            },
+            ..direct("MX Keypad", 0xc354)
+        };
+        let choices = vec![keypad(1), keypad(2), direct("MX Keys S", 0xb35b)];
+
+        let error = target_selection::select_target(&choices, Some("MX Keypad"))
+            .expect_err("the shared name matches both keypads")
+            .to_string();
+        assert!(
+            error.contains("(direct 046d:c354 (unit:4f4c4401))"),
+            "{error}"
+        );
+        assert!(
+            error.contains("(direct 046d:c354 (unit:4f4c4402))"),
+            "{error}"
+        );
+        assert!(error.contains("(direct 046d:b35b)"), "{error}");
+
+        let picked =
+            target_selection::select_target(&choices, Some("direct 046d:c354 (unit:4f4c4402)"))
+                .expect("the listed route selects one keypad");
+        assert_eq!(picked.route, keypad(2).route);
+    }
+
     #[test]
     fn only_definitively_unreachable_agent_endpoints_permit_capture() {
         assert!(endpoint_is_unreachable(&io::Error::from(
@@ -546,6 +595,7 @@ mod tests {
             {
                 let _capture = CaptureTarget {
                     target: direct("Synthetic", 0xb034),
+                    peers: Vec::new(),
                     _agent_guard: acquire_capture_ownership().await.unwrap(),
                 };
                 let output = child("contender").output().unwrap();
