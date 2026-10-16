@@ -33,6 +33,7 @@ async fn replay_inventory_and_authoritative_read_share_one_injected_backend() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: PRODUCT_ID,
+        identity: None,
     };
     let backend = Arc::new(
         ReplayBackend::new(
@@ -82,6 +83,7 @@ async fn replay_inventory_and_authoritative_read_share_one_injected_backend() {
             .lookup(&DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: PRODUCT_ID + 1,
+                identity: None,
             })
             .is_none(),
         "registry lookup must remain exact"
@@ -324,6 +326,7 @@ fn direct_route() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: PRODUCT_ID,
+        identity: None,
     }
 }
 

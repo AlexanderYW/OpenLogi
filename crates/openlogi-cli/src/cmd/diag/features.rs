@@ -22,6 +22,7 @@ pub async fn run(_args: FeaturesArgs) -> Result<()> {
             let route = DeviceRoute::for_slot(inv, paired.slot).unwrap_or(DeviceRoute::Direct {
                 vendor_id: inv.receiver.vendor_id,
                 product_id: inv.receiver.product_id,
+                identity: None,
             });
             match paired.codename.as_deref() {
                 Some(name) => println!("device: {name} ({route})"),

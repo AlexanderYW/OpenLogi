@@ -200,6 +200,7 @@ async fn shared_read_and_lighting_apis_use_the_supplied_channel() -> Result<(), 
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         },
     );
 
@@ -353,6 +354,7 @@ async fn dpi_reads_and_writes_work_on_a_device_with_only_extended_dpi() -> Resul
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         },
     );
 
@@ -410,6 +412,7 @@ async fn a_dropped_dpi_write_is_retried_once() -> Result<(), WriteError> {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb034,
+            identity: None,
         },
     );
 
@@ -475,6 +478,7 @@ async fn a_keyboard_with_only_per_key_v2_can_be_coloured() -> Result<(), WriteEr
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc339,
+            identity: None,
         },
     );
 
@@ -991,6 +995,7 @@ async fn fn_lock_addresses_the_current_host_slot_read_from_hosts_info() -> Resul
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb378,
+            identity: None,
         },
     );
 
@@ -1061,6 +1066,7 @@ async fn fn_lock_write_does_not_guess_the_host_when_hosts_info_is_unreadable() {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb378,
+            identity: None,
         },
     );
 
@@ -1130,6 +1136,7 @@ async fn fn_lock_on_a_legacy_keyboard_uses_0x40a0_and_reads_back_its_writes() {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc31c,
+            identity: None,
         },
     );
     let calls = |function: u8| {
@@ -1223,6 +1230,7 @@ async fn fn_lock_write_that_the_keyboard_does_not_echo_fails() {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb342,
+            identity: None,
         },
     );
 
@@ -1337,6 +1345,7 @@ async fn color_led_effects_shared(
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc33f,
+            identity: None,
         },
     );
     (shared, handle)
@@ -1479,6 +1488,7 @@ async fn a_rejected_per_key_frame_fails_the_write_before_the_commit() {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc339,
+            identity: None,
         },
     );
 
@@ -1511,6 +1521,7 @@ async fn a_rejected_per_key_commit_fails_the_write() {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc339,
+            identity: None,
         },
     );
 
@@ -1538,6 +1549,7 @@ async fn per_key_frames_are_fenced_before_their_one_commit() -> Result<(), Write
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc339,
+            identity: None,
         },
     );
 
@@ -1618,6 +1630,7 @@ async fn brightness_device(
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc354,
+            identity: None,
         },
     );
     (shared, handle)

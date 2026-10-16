@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use openlogi_core::config::Lighting;
+use openlogi_core::device_order::DeviceIdentity;
 use openlogi_hid::{
     CaptureChannelSlot, ChannelRegistry, DeviceIoGate, DeviceRoute, Dpi, FollowerLink,
     FollowerRelease, HidppOperation, HostOs, HostSwitchError, LeadCookie, OsLayoutOutcome,
@@ -52,12 +53,14 @@ pub(crate) use write_order::{WriteOrder, WriteTicket};
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Physical transport behind a route. Slots on one receiver share a HID writer,
-/// so they share one turnstile even though their device indices differ.
+/// so they share one turnstile even though their device indices differ. Two
+/// identical direct devices are two transports; same-model devices without an
+/// identity cannot be told apart, so they share one.
 #[derive(Clone, PartialEq, Eq)]
 enum TransportKey {
     Bolt(String),
     Unifying(String),
-    Direct(u16, u16),
+    Direct(u16, u16, Option<DeviceIdentity>),
     RawHid(u16, u16, u16, u16, String),
 }
 
@@ -69,7 +72,8 @@ impl From<&DeviceRoute> for TransportKey {
             DeviceRoute::Direct {
                 vendor_id,
                 product_id,
-            } => Self::Direct(*vendor_id, *product_id),
+                identity,
+            } => Self::Direct(*vendor_id, *product_id, identity.clone()),
             DeviceRoute::RawHid {
                 vendor_id,
                 product_id,
@@ -1552,6 +1556,7 @@ mod tests {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc52b,
+            identity: None,
         }
     }
 
@@ -1849,6 +1854,7 @@ mod tests {
             &turns.turn_for(&DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb034,
+                identity: None,
             }),
             async { true },
         )
@@ -2161,6 +2167,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let original = NodeId::from("retired-mouse-node".to_string());
         let replacement_node = NodeId::from("replacement-mouse-node".to_string());

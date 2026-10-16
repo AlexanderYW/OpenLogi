@@ -11,6 +11,7 @@ fn target() -> KeyboardTarget {
         route: DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc548,
+            identity: None,
         },
         wanted: BTreeMap::new(),
         grid: BTreeMap::new(),
@@ -33,6 +34,7 @@ fn keypad_route() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc354,
+        identity: None,
     }
 }
 
@@ -336,8 +338,13 @@ async fn each_published_keyboard_runs_its_own_session() {
         transport_turns: crate::hardware::TransportTurns::default(),
     };
     let (ring, _ring_rx) = mpsc::unbounded_channel();
-    let mut actions =
-        crate::runtime::ActionRuntime::new(Arc::default(), device_access.clone(), ring).unwrap();
+    let mut actions = crate::runtime::ActionRuntime::new(
+        Arc::default(),
+        Arc::default(),
+        device_access.clone(),
+        ring,
+    )
+    .unwrap();
     let (events, _event_rx) = mpsc::unbounded_channel();
     let channels = KeyboardSessionChannels {
         access: device_access,
