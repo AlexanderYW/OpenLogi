@@ -43,7 +43,7 @@ Two more things this crate is not:
 | `services/` | Infrastructure, not UI: the IPC client, asset resolution and download, device reads, diagnostics, i18n. |
 | `ui/` | Shared components and the hand-painted `Palette` (`theme.rs`). |
 | `platform/` | OS integration — app icon, OS facts, updater. |
-| `app_assets.rs` | The GPUI asset source, composed in order: embedded logo → `openlogi-ui`'s `ActionIcons` (the `openlogi-action-icons` table) → gpui-component's bundled lucide set. A new icon path that resolves nowhere renders blank rather than failing to build. |
+| `app_assets.rs` | The GPUI asset source, composed in order: embedded logo → `openlogi-ui`'s `action-icons/` → gpui-component's bundled lucide set. A new icon path that resolves nowhere renders blank rather than failing to build. |
 
 Panel selection and settings writes follow `.agents/rules/gui.md`.
 

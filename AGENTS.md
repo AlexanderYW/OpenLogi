@@ -39,8 +39,7 @@ access devices directly.
 | `crates/openlogi-ipc` | The tarpc IPC contract (`src/ipc.rs`) + its local-socket transport, shared by the agent and its clients |
 | `crates/openlogi-agent` | The `openlogi-agent` binary — runtime HID/input server |
 | `crates/openlogi-permissions` | Privacy-permission status + System-Settings deep links: macOS TCC reads, Linux device-file probes. Reads only — never prompts |
-| `crates/openlogi-action-icons` | The vendored action SVGs as an embedded table — no toolkit, so the agent draws keypad LCD keys from the same glyphs the GUI and overlay serve |
-| `crates/openlogi-ui` | Presentation shared by the two GPUI processes: the action-icon asset source, colors, and locale catalogs. Currently depends on `gpui`, not `gpui-component` |
+| `crates/openlogi-ui` | Presentation shared by the two GPUI processes: action icons, colors, the GPUI asset source, and locale catalogs. Currently depends on `gpui`, not `gpui-component` |
 | `crates/openlogi-desktop` | GPUI + gpui-component desktop app — polls the agent, no HID/input I/O |
 | `crates/openlogi-overlay` | The `openlogi-overlay` binary — cursor-centred Actions Ring, a pure IPC client |
 | `xtask` | `cargo xtask` maintenance: bundling, packaging, release manifest |
