@@ -9,7 +9,7 @@ use hidpp::{
         adc_measurement::{AdcMeasurement, AdcMeasurementFeature},
         battery_status::BatteryStatusFeature,
         battery_voltage::BatteryVoltageFeature,
-        device_information::{DeviceInformationFeature, DeviceTransport},
+        device_information::{DeviceInformation, DeviceInformationFeature, DeviceTransport},
         device_type_and_name::DeviceTypeAndNameFeature,
         gestures2::Gestures2Feature,
         multi_platform::{MultiPlatformCapabilities, MultiPlatformFeature},
@@ -20,6 +20,7 @@ use hidpp::{
 use openlogi_core::device::{
     BatteryInfo, BatteryLevel, Capabilities, DeviceKind, DeviceModelInfo, DeviceTransports,
 };
+use openlogi_core::device_order::DeviceIdentity;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -313,17 +314,13 @@ pub(super) async fn probe_features(
     let model_info = match device.get_feature::<DeviceInformationFeature>() {
         Some(feature) => match feature.get_device_info().await {
             Ok(info) => {
-                let serial_number = if info.capabilities.serial_number {
-                    match feature.get_serial_number().await {
-                        Ok(serial) => normalize_serial_number(&serial),
-                        Err(e) => {
-                            debug!(slot, error = ?e, "DeviceInformation serial read failed");
-                            identity_incomplete = true;
-                            None
-                        }
+                let serial_number = match read_serial_number(&feature, &info).await {
+                    Ok(serial) => serial,
+                    Err(e) => {
+                        debug!(slot, error = ?e, "DeviceInformation serial read failed");
+                        identity_incomplete = true;
+                        None
                     }
-                } else {
-                    None
                 };
                 Some(DeviceModelInfo {
                     entity_count: info.entity_count,
@@ -513,6 +510,38 @@ async fn probe_extra_capabilities(
         caps.virtual_thumbwheel = virtual_thumbwheel;
     }
     Ok(())
+}
+
+/// The serial `info` says the device reports, normalized as the inventory
+/// stores it, or `None` when the device reports no serial.
+async fn read_serial_number(
+    feature: &DeviceInformationFeature,
+    info: &DeviceInformation,
+) -> Result<Option<String>, hidpp::protocol::v20::Hidpp20Error> {
+    if !info.capabilities.serial_number {
+        return Ok(None);
+    }
+    Ok(normalize_serial_number(&feature.get_serial_number().await?))
+}
+
+/// The identity of the device at `index` on `channel`, read the way the probe
+/// reads it — `0x0003`'s serial, else its unit id — or `None` when it reports
+/// neither or does not answer. A direct route carries this identity, so this
+/// is how a node is matched to one.
+pub(crate) async fn read_device_identity(
+    channel: &Arc<HidppChannel>,
+    index: u8,
+) -> Option<DeviceIdentity> {
+    let mut device = Device::new(Arc::clone(channel), index).await.ok()?;
+    let found = device
+        .root()
+        .get_feature(DeviceInformationFeature::ID)
+        .await
+        .ok()??;
+    let feature = device.add_feature::<DeviceInformationFeature>(found.index);
+    let info = feature.get_device_info().await.ok()?;
+    let serial = read_serial_number(&feature, &info).await.ok()?;
+    DeviceIdentity::physical(serial.as_deref(), info.unit_id)
 }
 
 #[cfg(test)]
