@@ -17,8 +17,7 @@ use openlogi_core::color::Rgb;
 use tracing::{debug, warn};
 
 use super::{
-    FRAME_GAP, HidppOperation, WriteError, WriteScope, classify_channel_error,
-    classify_hidpp_error, open_feature,
+    FRAME_GAP, HidppOperation, WriteError, WriteScope, classify_hidpp_error, open_feature,
 };
 
 const FEATURE: u16 = 0x8071;
@@ -297,17 +296,13 @@ async fn unit_id(device: &mut Device) -> Result<Option<[u8; 4]>, WriteError> {
         Err(WriteError::FeatureUnsupported { .. }) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let info = feature
-        .get_device_info()
-        .await
-        .map_err(|error| match error {
-            Hidpp20Error::Channel(error) => classify_channel_error(error, HidppOperation::Lighting),
-            other => classify_hidpp_error(
-                other,
-                HidppOperation::Lighting,
-                DeviceInformationFeature::ID,
-            ),
-        })?;
+    let info = feature.get_device_info().await.map_err(|error| {
+        classify_hidpp_error(
+            error,
+            HidppOperation::Lighting,
+            DeviceInformationFeature::ID,
+        )
+    })?;
     Ok(Some(info.unit_id))
 }
 
@@ -350,8 +345,5 @@ async fn discover(
 }
 
 fn classify(error: Hidpp20Error) -> WriteError {
-    match error {
-        Hidpp20Error::Channel(error) => classify_channel_error(error, HidppOperation::Lighting),
-        other => classify_hidpp_error(other, HidppOperation::Lighting, FEATURE),
-    }
+    classify_hidpp_error(error, HidppOperation::Lighting, FEATURE)
 }
