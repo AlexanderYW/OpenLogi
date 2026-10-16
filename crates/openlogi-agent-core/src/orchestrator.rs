@@ -670,8 +670,6 @@ impl Orchestrator {
         })
     }
 
-    /// The binding page `config_key`'s keypad is on: the last page turned to,
-    /// or page 1 — also when the config has since removed that page.
     /// `config_key`'s stored bindings for the foreground app, across every
     /// keypad page.
     fn foreground_key_bindings(&self, config_key: &str) -> BTreeMap<ButtonId, Binding> {
@@ -688,6 +686,8 @@ impl Orchestrator {
         bindings_on_page(stored, self.keypad_page(config_key))
     }
 
+    /// The binding page `config_key`'s keypad is on: the last page turned to,
+    /// or page 1 — also when the config has since removed that page.
     fn keypad_page(&self, config_key: &str) -> KeypadPage {
         self.keypad_pages
             .get(config_key)
