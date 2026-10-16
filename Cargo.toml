@@ -90,12 +90,6 @@ dispatch2 = "0.3.1"
 # The macOS privacy-grant notifications the hook's probe cue and the agent's
 # grant watchers wake on; compiles to a heartbeat-only watch elsewhere.
 axwatch = "0.1"
-# Raster images: the keypad's LCD tiles (JPEG) and the desktop's PNG assets.
-# Each member enables only the codecs it uses.
-image = { version = "0.25", default-features = false }
-# SVG rasterization for the keypad's LCD tiles. Kept on the release gpui-pre
-# links, so the agent and the GUI resolve one resvg.
-resvg = { version = "0.46", default-features = false }
 
 # Version-aligned GPUI snapshots. Keep the core and platform on one release so
 # the desktop, overlay, and their integrations share the same GPUI types.
