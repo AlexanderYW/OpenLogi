@@ -517,6 +517,26 @@ mod tests {
         assert_eq!(picked.route, keypad(2).route);
     }
 
+    /// Two devices on the same slot of different receivers share a safe label
+    /// but are not twins: the list must never fall back to their receiver UIDs.
+    #[test]
+    fn same_slot_devices_on_different_receivers_keep_the_safe_label() {
+        let choices = vec![
+            bolt("MX Master 3S", "OL-BOLT-UID-0001", 1),
+            bolt("MX Keys S", "OL-BOLT-UID-0002", 1),
+        ];
+
+        let error = target_selection::select_target(&choices, None)
+            .expect_err("two candidates need --device")
+            .to_string();
+        assert!(!error.contains("OL-BOLT-UID"), "{error}");
+        assert_eq!(
+            error.matches("(Bolt receiver slot 1)").count(),
+            2,
+            "{error}"
+        );
+    }
+
     #[test]
     fn only_definitively_unreachable_agent_endpoints_permit_capture() {
         assert!(endpoint_is_unreachable(&io::Error::from(
