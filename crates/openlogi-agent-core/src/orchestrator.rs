@@ -55,7 +55,7 @@ use crate::runtime::scroll::ScrollPreferences;
 use crate::watchers::host_switch::{HostSwitchLink, HostSwitchLinks};
 use crate::watchers::inventory::InventoryRefresh;
 use crate::watchers::key_display::{KeyDisplaySpec, KeyFace, SharedKeyDisplaySpecs};
-use crate::watchers::keyboard::{KeyboardSpec, SharedKeyboardSpec};
+use crate::watchers::keyboard::{KeyboardSpec, SharedKeyboardSpecs};
 use crate::watchers::light::{WatchedLight, WatchedLights};
 use crate::{DpiCycleState, DpiCycles, PointerSpeeds};
 
@@ -137,11 +137,12 @@ pub struct SharedHandles {
     pub device_io: DeviceIoGate,
     /// Shared transport pool used by long-running host-switch sessions.
     pub channel_pool: ChannelPool,
-    /// The keyboard key-capture watcher's target + bindings, `None` while no
-    /// online keyboard has bound keys.
-    pub keyboard_spec: SharedKeyboardSpec,
-    /// The keyboard capture session's open channel, reused by Fn-lock writes
-    /// (the mouse-oriented [`Self::capture_channel`] points elsewhere).
+    /// The keyboard key-capture watcher's targets + bindings: one per enabled
+    /// keyboard-family device with bound keys, empty while none has any.
+    pub keyboard_specs: SharedKeyboardSpecs,
+    /// The keyboard capture sessions' open channel, reused by Fn-lock writes
+    /// (the mouse-oriented [`Self::capture_channel`] points elsewhere). Last
+    /// writer wins; a write uses it only when it matches the write's route.
     pub keyboard_channel: CaptureChannelSlot,
     /// What every online keypad's LCD keys should show; empty while no
     /// keypad with display keys is present.
@@ -486,7 +487,7 @@ pub struct Orchestrator {
     /// Private producer halves for the read-only runtime projections in
     /// `shared`, keeping the orchestrator's single-writer contract structural.
     capture_plans_tx: watch::Sender<Arc<CapturePublication>>,
-    keyboard_spec_tx: watch::Sender<Option<Arc<KeyboardSpec>>>,
+    keyboard_specs_tx: watch::Sender<Arc<Vec<KeyboardSpec>>>,
     key_display_specs_tx: watch::Sender<Arc<Vec<KeyDisplaySpec>>>,
     host_switch_links_tx: watch::Sender<Arc<Vec<HostSwitchLink>>>,
     watched_lights_tx: watch::Sender<Arc<Vec<WatchedLight>>>,
@@ -536,7 +537,7 @@ impl Orchestrator {
     ) -> Self {
         let (capture_plans_tx, capture_plans) =
             watch::channel(Arc::new(CapturePublication::default()));
-        let (keyboard_spec_tx, keyboard_spec) = watch::channel(None);
+        let (keyboard_specs_tx, keyboard_specs) = watch::channel(Arc::new(Vec::new()));
         let (key_display_specs_tx, key_display_specs) = watch::channel(Arc::new(Vec::new()));
         let (host_switch_links_tx, host_switch_links) = watch::channel(Arc::new(Vec::new()));
         let (watched_lights_tx, watched_lights) = watch::channel(Arc::new(Vec::new()));
@@ -555,7 +556,7 @@ impl Orchestrator {
             capture_plans,
             capture_channel: Arc::new(RwLock::new(None)),
             channel_registry: ChannelRegistry::default(),
-            keyboard_spec,
+            keyboard_specs,
             keyboard_channel: Arc::new(RwLock::new(None)),
             key_display_specs,
             capture_rearm_generation: Arc::new(AtomicU64::new(0)),
@@ -595,7 +596,7 @@ impl Orchestrator {
             keypad_pages: BTreeMap::new(),
             os_mouse_hook_available: false,
             capture_plans_tx,
-            keyboard_spec_tx,
+            keyboard_specs_tx,
             key_display_specs_tx,
             host_switch_links_tx,
             watched_lights_tx,
@@ -701,70 +702,83 @@ impl Orchestrator {
         }
     }
 
-    /// The keyboard key-capture spec for the managed keyboard, or `None` when
-    /// no enabled keyboard carries a real binding (an unbound key must never
-    /// be diverted).
+    /// The key-capture spec of every enabled keyboard-family device with a
+    /// real binding (an unbound key must never be diverted), at most one per
+    /// route: each gets its own capture session, so an MX Keys and an MX
+    /// Creative Keypad — or two keyboards on one receiver — capture at once.
     ///
     /// The bound keys *are* the capture set: every
-    /// [`ButtonId::Control`] in the keyboard's effective bindings names the
-    /// `0x1b04` control to divert, and the capture session arms whichever of
+    /// [`ButtonId::Control`] in a keyboard's effective bindings names the
+    /// `0x1b04` control to divert, and its capture session arms whichever of
     /// those the device's own control table reports as divertable. No fixed key
     /// table sits in between, so a keyboard OpenLogi has never seen is
     /// remappable the day it ships. [`ButtonId::Grid`] bindings join the same
     /// session as the observed keypad grid keys — same binding gate, no
     /// firmware writes.
     ///
-    /// One session at a time, and only a keyboard with something bound can
-    /// hold it: an online bound keyboard wins over an asleep one, so a stale
-    /// receiver slot for the same model (#1581) — which carries no bindings —
-    /// never takes the session from the keyboard that is actually typing, and
-    /// never shadows it while it naps. Among bound keyboards in the same
-    /// online state, inventory order breaks the tie. Beyond that the spec
-    /// deliberately does NOT require the keyboard to be online: an idle
-    /// keyboard sleeps within minutes and probe timeouts can flap it offline,
-    /// and tearing the capture session down on every nap would hand the
-    /// diverted keys back to the firmware (dead bindings) until the re-arm
-    /// races through. The session instead stays up across sleeps — its
-    /// channel is to the always-present receiver — and re-arms diversion on
-    /// the device's `0x1d4b` reconnection broadcast.
-    fn keyboard_spec_for(&self) -> Option<KeyboardSpec> {
-        let candidates: Vec<KeyboardCandidate<'_>> = self
+    /// A stale receiver slot for the same model (#1581) carries no bindings,
+    /// so it publishes no spec and never shadows the keyboard that is
+    /// actually typing. Beyond that a spec deliberately does NOT require the
+    /// keyboard to be online: an idle keyboard sleeps within minutes and
+    /// probe timeouts can flap it offline, and tearing its capture session
+    /// down on every nap would hand the diverted keys back to the firmware
+    /// (dead bindings) until the re-arm races through. The session instead
+    /// stays up across sleeps — its channel is to the always-present receiver
+    /// — and re-arms diversion on the device's `0x1d4b` reconnection
+    /// broadcast.
+    ///
+    /// Two inventory entries can share a route — a direct route names a
+    /// VID/PID, so two identical wired devices are indistinguishable there.
+    /// The online one wins that route, then inventory order.
+    fn keyboard_specs_for(&self) -> Vec<KeyboardSpec> {
+        let candidates = self
             .devices
             .iter()
-            .filter(|d| d.kind.is_keyboard_family() && d.route.is_some())
+            .filter(|d| d.kind.is_keyboard_family())
             .filter(|d| self.config.device_enabled(&d.config_key))
             .filter_map(|dev| {
+                let route = dev.route.clone()?;
                 let stored = self.foreground_key_bindings(&dev.config_key);
                 // Capture from every page; dispatch the current page's.
                 let divert = keyboard_divert_set(&stored);
                 let bindings = self.current_page_of(&dev.config_key, &stored);
-                (!divert.wanted.is_empty() || !divert.grid.is_empty()).then_some(
+                (!divert.wanted.is_empty() || !divert.grid.is_empty()).then_some((
                     KeyboardCandidate {
                         dev,
                         bindings,
                         divert,
                     },
-                )
-            })
-            .collect();
-        let chosen = candidates
-            .iter()
-            .find(|candidate| candidate.dev.online)
-            .or_else(|| candidates.first())?;
-        for &cid in &chosen.divert.reserved {
-            warn!(
-                cid = format_args!("{cid:#06x}"),
-                key = %chosen.dev.config_key,
-                "binding names a control OpenLogi never diverts as a key — left native"
-            );
+                    route,
+                ))
+            });
+        let mut chosen: Vec<(KeyboardCandidate<'_>, DeviceRoute)> = Vec::new();
+        for (candidate, route) in candidates {
+            match chosen.iter_mut().find(|(_, taken)| *taken == route) {
+                Some(entry) if candidate.dev.online && !entry.0.dev.online => {
+                    *entry = (candidate, route);
+                }
+                Some(_) => {}
+                None => chosen.push((candidate, route)),
+            }
         }
-        Some(KeyboardSpec {
-            config_key: chosen.dev.config_key.clone(),
-            route: chosen.dev.route.clone()?,
-            wanted: chosen.divert.wanted.clone(),
-            grid: chosen.divert.grid.clone(),
-            bindings: chosen.bindings.clone(),
-        })
+        let mut specs = Vec::with_capacity(chosen.len());
+        for (chosen, route) in chosen {
+            for &cid in &chosen.divert.reserved {
+                warn!(
+                    cid = format_args!("{cid:#06x}"),
+                    key = %chosen.dev.config_key,
+                    "binding names a control OpenLogi never diverts as a key — left native"
+                );
+            }
+            specs.push(KeyboardSpec {
+                config_key: chosen.dev.config_key.clone(),
+                route,
+                wanted: chosen.divert.wanted,
+                grid: chosen.divert.grid,
+                bindings: chosen.bindings,
+            });
+        }
+        specs
     }
 
     /// `config_key`'s stored bindings for the foreground app, across every
@@ -871,7 +885,7 @@ impl Orchestrator {
             &self.host_switch_links_tx,
             host_switch_links(&self.config, &self.devices),
         );
-        publish_optional_arc_if_changed(&self.keyboard_spec_tx, self.keyboard_spec_for());
+        publish_arc_if_changed(&self.keyboard_specs_tx, self.keyboard_specs_for());
         publish_arc_if_changed(&self.watched_lights_tx, self.watched_lights());
         self.publish_lights();
         publish_arc_if_changed(&self.key_display_specs_tx, self.key_display_specs_for());
@@ -988,7 +1002,7 @@ impl Orchestrator {
     /// handoff has to follow the mouse after capture stops.
     fn capture_publication(&self) -> CapturePublication {
         let rearm_generation = self.shared.capture_rearm_generation.load(Ordering::Relaxed);
-        let keyboard = self.keyboard_spec_for();
+        let keyboards = self.keyboard_specs_for();
         let mut plans = Vec::new();
         let mut routes = BTreeMap::new();
         for dev in &self.devices {
@@ -1019,9 +1033,9 @@ impl Orchestrator {
             plan.dispatch.invert_wheel = wheel_inverted(&self.config, dev);
             plan.target.spec.divert_main_wheel =
                 main_wheel_divert(&self.config, dev, self.os_mouse_hook_available);
-            if let Some(keyboard) = keyboard
-                .as_ref()
-                .filter(|keyboard| keyboard.route == plan.target.route)
+            if let Some(keyboard) = keyboards
+                .iter()
+                .find(|keyboard| keyboard.route == plan.target.route)
             {
                 plan.release_controls(&keyboard.wanted);
             }
@@ -1940,19 +1954,6 @@ fn publish_arc_if_changed<T: PartialEq>(publication: &watch::Sender<Arc<T>>, val
             return false;
         }
         *current = Arc::new(value);
-        true
-    });
-}
-
-fn publish_optional_arc_if_changed<T: PartialEq>(
-    publication: &watch::Sender<Option<Arc<T>>>,
-    value: Option<T>,
-) {
-    publication.send_if_modified(|current| {
-        if current.as_deref() == value.as_ref() {
-            return false;
-        }
-        *current = value.map(Arc::new);
         true
     });
 }

@@ -1,0 +1,38 @@
+# Owner: openlogi_agent_core::watchers::capture_manager — the slot bookkeeping
+# the gesture and keyboard capture managers share: the one receiver lease
+# their sessions hold (acquire_session_lease), owed restores retried and
+# expedited (retry_pending_restores, expedite_pending_restores,
+# has_pending_restores), and the earliest recovery deadline (next_deadline).
+id: agent-capture-slots-owner
+language: rust
+severity: error
+message: The capture managers' slot bookkeeping is watchers::capture_manager's (acquire_session_lease, next_deadline, retry/expedite/has_pending_restores); call it instead of defining another copy or acquiring a session lease here.
+note: |
+  The keyboard manager grew a verbatim copy of the gesture manager's lease,
+  restore-retry and deadline helpers when it moved to one session per route.
+  See "Single source of truth" in AGENTS.md.
+files:
+  - crates/openlogi-agent-core/src/watchers/gesture.rs
+  - crates/openlogi-agent-core/src/watchers/gesture/**/*.rs
+  - crates/openlogi-agent-core/src/watchers/keyboard.rs
+  - crates/openlogi-agent-core/src/watchers/keyboard/**/*.rs
+ignores:
+  - "**/tests.rs"
+  - "**/tests/**"
+rule:
+  any:
+    # A free-standing copy of a helper. The managers' trait methods of the
+    # same names delegate to the owner and sit inside an impl.
+    - all:
+        - kind: function_item
+        - has:
+            field: name
+            regex: '^(acquire_session_lease|next_deadline|retry_pending_restores|expedite_pending_restores|has_pending_restores)$'
+        - not:
+            inside:
+              kind: impl_item
+              stopBy: end
+    # Leasing the receiver directly instead of through the shared lease.
+    - all:
+        - kind: field_identifier
+        - regex: '^try_acquire_for_session$'

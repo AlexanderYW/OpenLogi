@@ -220,7 +220,7 @@ pub(crate) fn spawn_hidpp_watchers(
         shared.device_io.clone(),
     );
     let keyboard = watchers::keyboard::spawn(
-        &shared.keyboard_spec,
+        &shared.keyboard_specs,
         shared.keyboard_access(),
         inputs.dispatcher.clone(),
     );

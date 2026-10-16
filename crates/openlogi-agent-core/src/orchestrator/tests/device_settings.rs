@@ -635,7 +635,7 @@ fn keyboard_spec_diverts_exactly_the_bound_controls() {
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("kbd", 1, true)];
 
-    let spec = orch.keyboard_spec_for().expect("bound keys publish a spec");
+    let spec = sole_keyboard_spec(&orch).expect("bound keys publish a spec");
     assert_eq!(
         spec.wanted,
         BTreeMap::from([
@@ -670,9 +670,7 @@ fn grid_only_bindings_publish_their_index_set() {
     keypad.kind = DeviceKind::Numpad;
     orch.devices = vec![keypad];
 
-    let spec = orch
-        .keyboard_spec_for()
-        .expect("the bound grid key publishes a spec");
+    let spec = sole_keyboard_spec(&orch).expect("the bound grid key publishes a spec");
     assert_eq!(
         spec.grid,
         // `Middle` is the vendor report's index 5.
@@ -687,7 +685,7 @@ fn keyboard_spec_is_absent_without_a_real_binding_or_for_a_disabled_keyboard() {
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("kbd", 1, true)];
     assert!(
-        orch.keyboard_spec_for().is_none(),
+        sole_keyboard_spec(&orch).is_none(),
         "an unconfigured key is never diverted"
     );
 
@@ -701,30 +699,75 @@ fn keyboard_spec_is_absent_without_a_real_binding_or_for_a_disabled_keyboard() {
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("kbd", 1, true)];
     assert!(
-        orch.keyboard_spec_for().is_none(),
+        sole_keyboard_spec(&orch).is_none(),
         "a disabled keyboard is left fully native"
     );
 }
 
+/// Every bound keyboard-family device captures at once, each on its own
+/// route with its own keys and bindings — asleep or not — so a keyboard and
+/// a keypad never compete for one session.
 #[test]
-fn keyboard_spec_prefers_the_online_keyboard_over_a_sleeping_slot() {
-    // The same MX Keys Mini paired three times (#1581): the stale slots sort
-    // first but must not take the session from the keyboard that is typing.
+fn every_bound_keyboard_publishes_its_own_spec() {
     let mut config = Config::default();
-    for key in ["stale", "live"] {
+    config.set_binding(
+        "kbd",
+        ButtonId::control(0x010a),
+        Binding::Single(Action::Screenshot),
+    );
+    config.set_binding(
+        "keypad",
+        ButtonId::grid(GridKey::Middle),
+        Binding::Single(Action::Copy),
+    );
+    let mut orch = orchestrator(config);
+    orch.devices = vec![keyboard("kbd", 1, false), wired_keypad("keypad", true)];
+
+    let specs = orch.keyboard_specs_for();
+    let summary: Vec<_> = specs
+        .iter()
+        .map(|spec| {
+            (
+                spec.config_key.as_str(),
+                spec.wanted.keys().copied().collect::<Vec<_>>(),
+                spec.grid.keys().copied().collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [("kbd", vec![0x010a], vec![]), ("keypad", vec![], vec![5])]
+    );
+    assert_ne!(specs[0].route, specs[1].route);
+    assert_eq!(
+        specs[1].bindings.get(&ButtonId::grid(GridKey::Middle)),
+        Some(&Binding::Single(Action::Copy)),
+        "each spec dispatches its own device's bindings"
+    );
+}
+
+/// Two inventory entries on one route — a direct route names only a VID/PID —
+/// still reach one device, so they publish one spec: the online entry's, and
+/// with both asleep the first in inventory order.
+#[test]
+fn entries_sharing_a_route_publish_one_spec_preferring_the_online_one() {
+    let mut config = Config::default();
+    for key in ["first", "second"] {
         config.set_binding(
             key,
-            ButtonId::control(0x010a),
-            Binding::Single(Action::Screenshot),
+            ButtonId::grid(GridKey::Middle),
+            Binding::Single(Action::Copy),
         );
     }
     let mut orch = orchestrator(config);
-    orch.devices = vec![keyboard("stale", 1, false), keyboard("live", 2, true)];
-    assert_eq!(orch.keyboard_spec_for().expect("spec").config_key, "live");
+    orch.devices = vec![wired_keypad("first", false), wired_keypad("second", true)];
+    assert_eq!(
+        sole_keyboard_spec(&orch).expect("spec").config_key,
+        "second"
+    );
 
-    // With every bound keyboard asleep, inventory order breaks the tie.
-    orch.devices = vec![keyboard("stale", 1, false), keyboard("live", 2, false)];
-    assert_eq!(orch.keyboard_spec_for().expect("spec").config_key, "stale");
+    orch.devices = vec![wired_keypad("first", false), wired_keypad("second", false)];
+    assert_eq!(sole_keyboard_spec(&orch).expect("spec").config_key, "first");
 }
 
 #[test]
@@ -739,12 +782,12 @@ fn keyboard_spec_skips_a_keyboard_with_no_bound_controls() {
     );
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("unbound", 1, true), keyboard("bound", 2, true)];
-    assert_eq!(orch.keyboard_spec_for().expect("spec").config_key, "bound");
+    assert_eq!(sole_keyboard_spec(&orch).expect("spec").config_key, "bound");
 
     // An unbound keyboard being online does not make it a candidate: the
     // bound one holds the session even while asleep.
     orch.devices = vec![keyboard("unbound", 1, true), keyboard("bound", 2, false)];
-    assert_eq!(orch.keyboard_spec_for().expect("spec").config_key, "bound");
+    assert_eq!(sole_keyboard_spec(&orch).expect("spec").config_key, "bound");
 }
 
 #[test]
@@ -760,7 +803,7 @@ fn keyboard_spec_ignores_an_unbound_stale_slot_while_the_live_keyboard_sleeps() 
     );
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("stale", 1, false), keyboard("live", 2, false)];
-    assert_eq!(orch.keyboard_spec_for().expect("spec").config_key, "live");
+    assert_eq!(sole_keyboard_spec(&orch).expect("spec").config_key, "live");
 }
 
 #[test]
@@ -781,7 +824,7 @@ fn keyboard_spec_never_diverts_reserved_controls() {
     );
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("kbd", 1, true)];
-    assert!(orch.keyboard_spec_for().is_none());
+    assert!(sole_keyboard_spec(&orch).is_none());
 
     let mut config = Config::default();
     config.set_binding(
@@ -797,7 +840,7 @@ fn keyboard_spec_never_diverts_reserved_controls() {
     let mut orch = orchestrator(config);
     orch.devices = vec![keyboard("kbd", 1, true)];
     assert_eq!(
-        orch.keyboard_spec_for().expect("spec").wanted,
+        sole_keyboard_spec(&orch).expect("spec").wanted,
         BTreeMap::from([(0x010a, ButtonId::control(0x010a))])
     );
 }
@@ -935,7 +978,7 @@ fn a_page_turn_swaps_dispatch_without_changing_the_observed_keys() {
     use crate::runtime::PageTurn;
     let mut orch = paged_keypad();
 
-    let first = orch.keyboard_spec_for().expect("bound keys publish a spec");
+    let first = sole_keyboard_spec(&orch).expect("bound keys publish a spec");
     assert_eq!(
         first.grid,
         BTreeMap::from([
@@ -961,7 +1004,7 @@ fn a_page_turn_swaps_dispatch_without_changing_the_observed_keys() {
     );
 
     orch.turn_keypad_page(Some("keypad"), PageTurn::Next);
-    let second = orch.keyboard_spec_for().expect("spec");
+    let second = sole_keyboard_spec(&orch).expect("spec");
     assert_eq!(
         second.grid, first.grid,
         "the observed set is page-independent"
