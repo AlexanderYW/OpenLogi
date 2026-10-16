@@ -1,5 +1,5 @@
 use openlogi_core::binding::{ActionRingIcon, GridKey};
-use openlogi_device_registry::keypad::{KeyGrid, PanelPoint};
+use openlogi_device_registry::keypad::{MX_CREATIVE_KEYPAD_GRID, PanelPoint};
 
 use super::*;
 
@@ -7,7 +7,7 @@ const DISPLAY: KeyDisplay = KeyDisplay {
     key_size: 118,
     origin: PanelPoint { x: 23, y: 6 },
     pitch: 158,
-    grid: KeyGrid { rows: 3, cols: 3 },
+    grid: MX_CREATIVE_KEYPAD_GRID,
 };
 
 fn keypad(product_id: u16) -> DeviceRoute {

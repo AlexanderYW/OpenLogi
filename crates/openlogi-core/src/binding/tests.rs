@@ -908,7 +908,8 @@ fn grid_key_positions_are_the_row_major_grid_the_device_reports() {
         cells.insert(position);
     }
     assert_eq!(cells.len(), 9, "the nine keys fill distinct cells");
-    assert!(cells.iter().all(|cell| cell.row < 3 && cell.col < 3));
+    let grid = openlogi_device_registry::keypad::MX_CREATIVE_KEYPAD_GRID;
+    assert!(cells.iter().all(|cell| grid.contains(*cell)));
 }
 
 #[test]
