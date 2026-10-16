@@ -1,0 +1,16 @@
+# Owner: openlogi_agent_core::watchers::retry::Backoff — how an agent retry
+# loop lengthens its delay after a failure.
+id: agent-retry-backoff-owner
+language: rust
+severity: error
+message: watchers::retry::Backoff (openlogi-agent-core) owns the doubling retry delay; use it instead of doubling and capping a Duration here.
+note: |
+  The logind reconnect loop and the keypad LCD watcher each doubled a retry
+  delay up to a 60 s cap by hand. See "Single source of truth" in AGENTS.md.
+files:
+  - crates/**/*.rs
+ignores:
+  - crates/openlogi-agent-core/src/watchers/retry.rs
+rule:
+  kind: call_expression
+  regex: '\.saturating_mul\(\s*2\s*\)\s*\.min\('

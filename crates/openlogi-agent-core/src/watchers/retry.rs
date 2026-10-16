@@ -1,4 +1,6 @@
-//! Retry pacing shared by the HID++ session managers.
+//! Retry pacing shared by the HID++ session managers, and the doubling
+//! [`Backoff`] every agent retry loop that must not hammer a failing peer
+//! paces itself with.
 
 use std::time::Duration;
 
@@ -18,3 +20,49 @@ pub(super) async fn wait_for_deadline(deadline: Option<Instant>) {
         std::future::pending::<()>().await;
     }
 }
+
+/// A retry delay that doubles after every failed attempt, up to a cap, and
+/// returns to its initial delay once an attempt succeeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backoff {
+    initial: Duration,
+    max: Duration,
+    current: Duration,
+}
+
+impl Backoff {
+    /// A backoff that first waits `initial` and never longer than `max`.
+    #[must_use]
+    pub const fn new(initial: Duration, max: Duration) -> Self {
+        Self {
+            initial,
+            max,
+            current: initial,
+        }
+    }
+
+    /// How long to wait before the next attempt.
+    #[must_use]
+    pub const fn delay(&self) -> Duration {
+        self.current
+    }
+
+    /// Whether no failure has lengthened the delay since the last reset.
+    #[must_use]
+    pub fn is_initial(&self) -> bool {
+        self.current == self.initial
+    }
+
+    /// Lengthen the delay after a failed attempt.
+    pub fn failed(&mut self) {
+        self.current = self.current.saturating_mul(2).min(self.max);
+    }
+
+    /// Return to the initial delay after a successful attempt.
+    pub fn reset(&mut self) {
+        self.current = self.initial;
+    }
+}
+
+#[cfg(test)]
+mod tests;
