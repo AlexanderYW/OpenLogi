@@ -1,24 +1,142 @@
-//! The select loop the gesture and keyboard capture managers share.
+//! The select loop and slot bookkeeping the gesture and keyboard capture
+//! managers share.
 //!
 //! The two managers deliberately keep separate state machines (see
-//! [`super::capture_session`]): how many slots they track, how they lease the
-//! receiver, and what retiring a session cancels all differ. What they wait
-//! on, and in which order, does not. [`run`] is that loop; a
-//! [`CaptureManager`] is the state machine it drives.
+//! [`super::capture_session`]): what keys a slot, what a session targets and
+//! dispatches, and what retiring one cancels all differ. What they wait on,
+//! in which order, and how they keep a map of slots — one shared receiver
+//! lease, owed restores retried and expedited, the earliest recovery deadline
+//! — do not. [`run`] is that loop; a [`CaptureManager`] is the state machine
+//! it drives; the free functions below are the slot bookkeeping.
 
-use openlogi_hid::{DeviceIoGate, PendingCaptureRestore};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::{Arc, Weak};
+
+use openlogi_hid::{
+    CaptureSessionOutcome, CaptureSessionStop, ChannelRegistry, DeviceIoGate, DeviceRoute,
+    PendingCaptureRestore,
+};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 
-use super::retry::wait_for_deadline;
+use super::capture_session::CaptureSlot;
+use super::retry::{RETRY_DELAY, wait_for_deadline};
 use super::shutdown::ManagerCompletion;
-use crate::receiver_access::ReceiverRequestState;
+use crate::receiver_access::{ReceiverAccess, ReceiverRequestState, SessionReceiverLease};
 
 /// Firmware ownership a finished session could not release, and when its
 /// manager may next try.
 pub(super) struct PendingRestore {
     pub(super) token: PendingCaptureRestore,
     pub(super) retry_at: Instant,
+}
+
+/// One tracked device's capture slot, as every manager keeps it.
+pub(super) type ManagedSlot<Target, Dispatch> =
+    CaptureSlot<Target, Dispatch, PendingRestore, CaptureSessionStop>;
+
+/// The shared receiver lease every session of one manager holds, acquiring
+/// it when none of them is alive.
+pub(super) fn acquire_session_lease(
+    receiver_access: &ReceiverAccess,
+    lease: &mut Weak<SessionReceiverLease>,
+) -> Option<Arc<SessionReceiverLease>> {
+    if let Some(existing) = lease.upgrade() {
+        return Some(existing);
+    }
+    let fresh = Arc::new(receiver_access.try_acquire_for_session()?);
+    *lease = Arc::downgrade(&fresh);
+    Some(fresh)
+}
+
+/// The earliest instant recovery work in `slots` can make progress, or
+/// `None` while an exclusive request or suspended device I/O parks it.
+pub(super) fn next_deadline<Key, Target, Dispatch>(
+    requests: ReceiverRequestState,
+    device_io_allowed: bool,
+    slots: &HashMap<Key, ManagedSlot<Target, Dispatch>>,
+) -> Option<Instant> {
+    if requests.any() || !device_io_allowed {
+        return None;
+    }
+    slots
+        .values()
+        .filter_map(ManagedSlot::recovery)
+        .filter_map(|recovery| recovery.next_deadline(|pending| pending.retry_at))
+        .min()
+}
+
+/// Whether any slot still owes the firmware a restore.
+pub(super) fn has_pending_restores<Key, Target, Dispatch>(
+    slots: &HashMap<Key, ManagedSlot<Target, Dispatch>>,
+) -> bool {
+    slots.values().any(|slot| {
+        slot.recovery()
+            .is_some_and(|recovery| recovery.pending_restore.is_some())
+    })
+}
+
+/// Make every owed restore in `slots` due now.
+pub(super) fn expedite_pending_restores<Key, Target, Dispatch>(
+    slots: &mut HashMap<Key, ManagedSlot<Target, Dispatch>>,
+) {
+    let now = Instant::now();
+    for slot in slots.values_mut() {
+        if let Some(pending) = slot
+            .recovery_mut()
+            .and_then(|recovery| recovery.pending_restore.as_mut())
+        {
+            pending.retry_at = now;
+        }
+    }
+}
+
+/// Retry every restore in `slots` due by `now`. `elect` names the route a
+/// slot's restore should now follow — the device may have moved since its
+/// session ended — or `None` to keep it on the token's own route; a
+/// same-route retry keeps the replacement-only policy a channel change set.
+pub(super) async fn retry_pending_restores<Key, Target, Dispatch>(
+    slots: &mut HashMap<Key, ManagedSlot<Target, Dispatch>>,
+    registry: &ChannelRegistry,
+    now: Instant,
+    elect: impl Fn(&Key) -> Option<DeviceRoute>,
+) where
+    Key: Eq + Hash + Clone,
+{
+    let due: Vec<_> = slots
+        .iter()
+        .filter(|(_, slot)| {
+            slot.recovery()
+                .and_then(|recovery| recovery.pending_restore.as_ref())
+                .is_some_and(|pending| pending.retry_at <= now)
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in due {
+        let Some(CaptureSlot::Recovering(mut recovery)) = slots.remove(&key) else {
+            continue;
+        };
+        let Some(pending) = recovery.pending_restore.take() else {
+            slots.insert(key, CaptureSlot::Recovering(recovery));
+            continue;
+        };
+        let outcome = match elect(&key) {
+            Some(route) if route != *pending.token.route() => {
+                pending.token.retry_via(route, registry).await
+            }
+            _ => pending.token.retry(registry).await,
+        };
+        if let CaptureSessionOutcome::RestorePending(token) = outcome {
+            recovery.pending_restore = Some(PendingRestore {
+                token,
+                retry_at: Instant::now() + RETRY_DELAY,
+            });
+        }
+        if !recovery.is_empty() {
+            slots.insert(key, CaptureSlot::Recovering(recovery));
+        }
+    }
 }
 
 /// One capture manager's state machine, as [`run`] drives it.
