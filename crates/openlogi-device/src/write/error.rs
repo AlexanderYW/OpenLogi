@@ -39,7 +39,7 @@ pub(crate) fn classify_hidpp_error(
             operation,
             feature_hex,
         },
-        Hidpp20Error::Channel(error) => WriteError::Hidpp(format!("{error:?}")),
+        Hidpp20Error::Channel(error) => classify_channel_error(error, operation),
         _ => WriteError::Hidpp(format!("{error:?}")),
     }
 }
@@ -53,3 +53,6 @@ pub(crate) fn classify_channel_error(error: ChannelError, operation: HidppOperat
         other => WriteError::Hidpp(format!("{other:?}")),
     }
 }
+
+#[cfg(test)]
+mod tests;
