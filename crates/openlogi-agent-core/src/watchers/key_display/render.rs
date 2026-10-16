@@ -10,7 +10,6 @@ use std::io::Cursor;
 use image::ExtendedColorType;
 use image::ImageEncoder as _;
 use image::codecs::jpeg::JpegEncoder;
-use openlogi_action_icons::embedded_icon;
 use openlogi_core::binding::ActionRingIcon;
 use openlogi_hid::KeyImageJpeg;
 use resvg::{tiny_skia, usvg};
@@ -69,7 +68,8 @@ pub fn render_tile(face: KeyFace, size: u16) -> Result<KeyImageJpeg, RenderError
 
 fn draw_icon(pixmap: &mut tiny_skia::Pixmap, icon: ActionRingIcon) -> Result<(), RenderError> {
     let path = icon.asset_path();
-    let svg = embedded_icon(path).ok_or(RenderError::MissingIcon(path))?;
+    let svg =
+        openlogi_ui::action_icons::embedded_icon(path).ok_or(RenderError::MissingIcon(path))?;
     // The glyphs stroke with `currentColor`, which a renderer outside a
     // styled document resolves to black — invisible on the panel.
     let svg = String::from_utf8_lossy(svg).replace("currentColor", "#ffffff");

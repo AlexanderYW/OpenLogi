@@ -5484,13 +5484,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openlogi-action-icons"
-version = "0.8.14"
-dependencies = [
- "openlogi-core",
-]
-
-[[package]]
 name = "openlogi-agent"
 version = "0.8.14"
 dependencies = [
@@ -5537,7 +5530,6 @@ dependencies = [
  "axwatch",
  "futures-lite",
  "image",
- "openlogi-action-icons",
  "openlogi-core",
  "openlogi-device-registry",
  "openlogi-fixture",
@@ -5545,6 +5537,7 @@ dependencies = [
  "openlogi-hook",
  "openlogi-inject",
  "openlogi-ipc",
+ "openlogi-ui",
  "resvg 0.46.0",
  "thiserror 2.0.18",
  "tokio",
@@ -5900,7 +5893,6 @@ name = "openlogi-ui"
 version = "0.8.14"
 dependencies = [
  "gpui-pre",
- "openlogi-action-icons",
  "openlogi-core",
 ]
 

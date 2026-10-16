@@ -122,8 +122,7 @@ impl ActionRingIcon {
     /// Path of this glyph's embedded SVG, as the GPUI frontends' asset source
     /// serves it. The catalogue of shipped glyphs is a property of the icon
     /// set, so it lives with the variants rather than in either frontend —
-    /// `openlogi-action-icons` owns the bytes and tests that every variant
-    /// resolves.
+    /// `openlogi-ui` owns the bytes and tests that every variant resolves.
     #[must_use]
     pub const fn asset_path(self) -> &'static str {
         match self {
