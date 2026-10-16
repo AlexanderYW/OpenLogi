@@ -37,7 +37,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-image = { workspace = true, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 rust-i18n = "4"
 # The raw, un-negotiated system locale for the diagnostics report; locale
 # *negotiation* lives in openlogi-ui.
