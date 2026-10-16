@@ -168,6 +168,25 @@ impl Tiles {
         self.rendered.insert((face, size), Arc::clone(&tile));
         Ok(tile)
     }
+
+    /// The tile for `face`, or a blank one when `face` cannot be rendered —
+    /// so the key never keeps showing the glyph of an action it is no longer
+    /// bound to. `None` only when not even a blank tile renders.
+    ///
+    /// A render failure is a defect in the artwork, not the device: rendering
+    /// again cannot fix it, so the blank stands in for `face` until the
+    /// binding changes.
+    fn get_or_blank(&mut self, face: KeyFace, size: u16) -> Option<Arc<KeyImageJpeg>> {
+        match self.get(face, size) {
+            Ok(tile) => Some(tile),
+            Err(error) => {
+                warn!(%error, ?face, "key image could not be rendered — showing it blank");
+                self.get(KeyFace::Blank, size)
+                    .inspect_err(|error| warn!(%error, "blank key image could not be rendered"))
+                    .ok()
+            }
+        }
+    }
 }
 
 /// Spawn the key-display manager thread.
@@ -224,14 +243,8 @@ async fn paint_all(
         if failed.contains(&route) {
             continue;
         }
-        let tile = match tiles.get(paint.face, paint.spec.display.key_size) {
-            Ok(tile) => tile,
-            Err(error) => {
-                // A defect in the artwork, not the device: retrying cannot
-                // fix it, so leave this key and paint the rest.
-                warn!(%error, key = ?paint.key, face = ?paint.face, "key image could not be rendered");
-                continue;
-            }
+        let Some(tile) = tiles.get_or_blank(paint.face, paint.spec.display.key_size) else {
+            continue;
         };
         let (display, key) = (paint.spec.display, paint.key);
         let result = access
