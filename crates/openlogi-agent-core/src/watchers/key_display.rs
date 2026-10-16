@@ -12,7 +12,7 @@
 //! simply abandons any write in flight.
 //!
 //! A keypad whose write fails is left alone until its own retry deadline,
-//! which doubles with each further failure up to [`MAX_RETRY_DELAY`]: a node
+//! which doubles with each further failure up to `MAX_RETRY_DELAY`: a node
 //! that refuses the image report outright (one that does not declare it)
 //! fails the same way every time, so neither the timer nor a respec — an app
 //! switch, a rebind — may hammer it. A reconnect or a wake (a moved
