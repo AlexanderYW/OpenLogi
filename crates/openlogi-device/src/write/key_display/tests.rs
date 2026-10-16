@@ -27,9 +27,23 @@ fn hardware_ack() -> Vec<u8> {
     ack
 }
 
+/// An ack for a single-packet tile carrying `status`.
+fn ack_with_status(status: [u8; 2]) -> Vec<u8> {
+    let mut ack = hardware_ack();
+    ack[5..7].copy_from_slice(&status);
+    ack
+}
+
 async fn keypad(acks: bool) -> (SharedChannel, ReplayChannelHandle) {
+    answering(acks.then(hardware_ack)).await
+}
+
+/// A keypad that answers every image packet with `answer`, or never.
+async fn answering(answer: Option<Vec<u8>>) -> (SharedChannel, ReplayChannelHandle) {
     let (raw, handle) = ScriptedRawHidChannel::with_dynamic_responder(move |request| {
-        (acks && request.first() == Some(&IMAGE_HEADER[0])).then(hardware_ack)
+        answer
+            .clone()
+            .filter(|_| request.first() == Some(&IMAGE_HEADER[0]))
     });
     (
         SharedChannel::new(scripted_channel(raw).await, KEYPAD),
@@ -133,13 +147,43 @@ fn only_a_wired_keypad_with_display_keys_has_a_key_display() {
 }
 
 #[test]
-fn only_vendor_image_reports_count_as_an_ack() {
-    assert!(is_image_ack(&hardware_ack()));
+fn only_a_vendor_image_report_for_this_write_counts_as_an_ack() {
+    // A single-packet write's part is 0xe1; the ack echoes it as 0xc1.
+    let part = 0xe1 & !PART_MARKER;
+    assert_eq!(image_ack(&hardware_ack(), part), Some(Ok(())));
+    // The last packet of a three-packet write is 0x63, echoed as 0x43.
+    assert_eq!(image_ack(&hardware_ack(), 0x63 & !PART_MARKER), None);
     // A grid-key press shares the channel, not the function.
-    assert!(!is_image_ack(&[0x13, 0xff, 0x02, 0x00, 0x01, 0x01, 0x05]));
+    assert_eq!(
+        image_ack(&[0x13, 0xff, 0x02, 0x00, 0xc1, 0x00, 0x01], part),
+        None
+    );
     // A HID++ long reply with the same leading bytes is another report.
-    assert!(!is_image_ack(&[0x11, 0xff, 0x02, 0x2b, 0x00]));
-    assert!(!is_image_ack(&[0x13, 0xff]));
+    assert_eq!(
+        image_ack(&[0x11, 0xff, 0x02, 0x2b, 0xc1, 0x00, 0x01], part),
+        None
+    );
+    assert_eq!(image_ack(&[0x13, 0xff, 0x02, 0x2b, 0xc1], part), None);
+    assert_eq!(image_ack(&[0x13, 0xff], part), None);
+}
+
+#[test]
+fn an_ack_with_any_other_status_is_a_refusal() {
+    assert_eq!(
+        image_ack(&ack_with_status([0x00, 0x00]), 0xc1),
+        Some(Err([0x00, 0x00]))
+    );
+}
+
+#[tokio::test]
+async fn a_tile_the_device_refuses_fails_instead_of_counting_as_written() {
+    let (shared, _handle) = answering(Some(ack_with_status([0x01, 0x00]))).await;
+
+    let error = write_key_image_on(&shared, display(), GridKey::TopLeft, &jpeg(900))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, WriteError::Hidpp(message) if message.contains("01 00")));
 }
 
 #[tokio::test]
