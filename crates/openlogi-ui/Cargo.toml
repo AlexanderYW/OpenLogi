@@ -12,16 +12,11 @@ publish = false
 
 [dependencies]
 openlogi-core = { path = "../openlogi-core" }
+openlogi-action-icons = { path = "../openlogi-action-icons" }
 # `gpui` only — deliberately neither `gpui-component` nor its icon set. Every
 # dependency added here lands in the overlay helper too, so the widget kit and
-# the artwork only the app draws both stay on the app's side. Optional so the
-# agent can read the embedded action icons (to draw keypad LCD keys) without
-# linking a UI toolkit; both GPUI frontends take the default.
-gpui = { workspace = true, optional = true }
-
-[features]
-default = ["gpui"]
-gpui = ["dep:gpui"]
+# the artwork only the app draws both stay on the app's side.
+gpui = { workspace = true }
 
 [lints]
 workspace = true
