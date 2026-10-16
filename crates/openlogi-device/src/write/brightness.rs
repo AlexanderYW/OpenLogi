@@ -17,9 +17,24 @@ use hidpp::feature::brightness_control::{
 };
 use tracing::debug;
 
-use super::{HidppOperation, WriteError, classify_hidpp_error, open_feature};
+use super::{HidppOperation, WriteError, classify_hidpp_error, open_feature, with_route};
 use crate::SharedChannel;
+use crate::backend::HidBackend;
+use crate::channel::route::DeviceRoute;
 use openlogi_core::hid::{BrightnessState, WritableBrightness};
+
+/// Read the brightness state of the device on `route`, opening its channel.
+pub async fn get_brightness(
+    backend: &dyn HidBackend,
+    route: &DeviceRoute,
+) -> Result<BrightnessState, WriteError> {
+    let index = route.device_index();
+    with_route(backend, route, move |channel| async move {
+        let feature = open_brightness_feature(&channel, index).await?;
+        read_state(&feature).await
+    })
+    .await
+}
 
 /// Read the brightness state of the device already reached by `shared`.
 pub async fn get_brightness_on(shared: &SharedChannel) -> Result<BrightnessState, WriteError> {
