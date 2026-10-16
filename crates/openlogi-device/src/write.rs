@@ -96,7 +96,7 @@ pub use smartshift::{
 // module's callers name it through here, next to the writes it feeds.
 pub use openlogi_core::hid::light::commands_for_light_settings;
 
-pub(crate) use error::{classify_channel_error, classify_hidpp_error};
+pub(crate) use error::classify_hidpp_error;
 
 /// Look up `F` on a device by HID++ feature ID, register it with
 /// [`Device::add_feature`], and return the typed wrapper.
