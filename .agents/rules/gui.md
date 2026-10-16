@@ -36,7 +36,7 @@ paths:
   existing screens. `control_button`, `control_input`, and `control_select` apply
   `CONTROL_H` (30 px); `Palette` and the component theme must agree on `ThemeMode`.
   Adopt upstream improvements in these owners rather than patching each call site.
-  Shared SVGs use `openlogi-ui/action-icons/` and its `ActionIcons` asset source;
+  Shared SVGs live in `openlogi-action-icons/action-icons/`, served by `openlogi-ui`'s `ActionIcons` asset source;
   keep shared paths such as `RING_CANCEL_ICON` identical in the preview and overlay.
 - **Live language changes:** follow [i18n.md](i18n.md). Each localized binary generates
   its own backend for `openlogi-ui/locales/`. Use `localize_placeholder` for cached
