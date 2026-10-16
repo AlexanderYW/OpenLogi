@@ -3,7 +3,7 @@
 id: core-keyboard-family-owner
 language: rust
 severity: error
-message: DeviceKind::is_keyboard_family() (openlogi-core device.rs) decides which kinds are keyboard-like; call it instead of matching Keyboard | Numpad here.
+message: DeviceKind::is_keyboard_family() (openlogi-core device.rs) decides which kinds are keyboard-like; call it instead of matching Keyboard and Numpad together here.
 note: |
   The Keys-tab gate, the agent's keyboard capture filter, and its app-context
   choice each matched `Keyboard | Numpad`, so a new keyed kind would have had
@@ -13,5 +13,16 @@ files:
 ignores:
   - crates/openlogi-core/src/device.rs
 rule:
-  kind: macro_invocation
-  regex: '^matches!\s*\(.*DeviceKind::(Keyboard|Numpad)\s*\|\s*DeviceKind::(Keyboard|Numpad)'
+  any:
+    # A match arm, `if let`, or `let` pattern: the or-pattern itself.
+    - all:
+        - kind: or_pattern
+        - not:
+            inside:
+              kind: or_pattern
+        - regex: '(?s)DeviceKind::Keyboard\b.*DeviceKind::Numpad\b|DeviceKind::Numpad\b.*DeviceKind::Keyboard\b'
+    # `matches!` keeps its pattern as unparsed tokens, possibly wrapped over
+    # several lines by rustfmt.
+    - all:
+        - kind: macro_invocation
+        - regex: '(?s)^matches!\s*[\(\[\{].*(DeviceKind::Keyboard\b.*\|.*DeviceKind::Numpad\b|DeviceKind::Numpad\b.*\|.*DeviceKind::Keyboard\b)'
