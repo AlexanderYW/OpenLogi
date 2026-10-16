@@ -5,7 +5,7 @@ use std::fmt;
 use std::num::NonZeroU8;
 use std::str::FromStr;
 
-use openlogi_device_registry::keypad::KeyPosition;
+use openlogi_device_registry::keypad::{KeyPosition, MX_CREATIVE_KEYPAD_GRID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
@@ -365,12 +365,7 @@ impl GridKey {
     /// mapping from another number.
     #[must_use]
     pub const fn position(self) -> KeyPosition {
-        const COLUMNS: u16 = 3;
-        let idx = self.index() as u16 - 1;
-        KeyPosition {
-            row: idx / COLUMNS,
-            col: idx % COLUMNS,
-        }
+        MX_CREATIVE_KEYPAD_GRID.cell(self.index() as u16 - 1)
     }
 
     /// The 1-based index the device's vendor report carries for this key.

@@ -70,7 +70,21 @@ impl KeyGrid {
     pub const fn contains(self, key: KeyPosition) -> bool {
         key.row < self.rows && key.col < self.cols
     }
+
+    /// The cell of the key at zero-based `index`, counting row-major — left
+    /// to right, then top to bottom — the way a keypad numbers its keys.
+    #[must_use]
+    pub const fn cell(self, index: u16) -> KeyPosition {
+        KeyPosition {
+            row: index / self.cols,
+            col: index % self.cols,
+        }
+    }
 }
+
+/// The MX Creative Keypad's key grid: three rows of three, which its vendor
+/// report numbers row-major from the top-left.
+pub const MX_CREATIVE_KEYPAD_GRID: KeyGrid = KeyGrid { rows: 3, cols: 3 };
 
 /// Where a keypad's square LCD keys sit on its panel, in panel pixels.
 ///
@@ -111,7 +125,7 @@ const MX_CREATIVE_KEYPAD_DISPLAY: KeyDisplay = KeyDisplay {
     key_size: 118,
     origin: PanelPoint { x: 23, y: 6 },
     pitch: 158,
-    grid: KeyGrid { rows: 3, cols: 3 },
+    grid: MX_CREATIVE_KEYPAD_GRID,
 };
 
 /// All standalone keypad identities OpenLogi recognizes.
@@ -190,6 +204,16 @@ mod tests {
         assert_eq!(display.key_origin(at(1, 2)), Some(point(24, 12)));
         assert!(display.key_origin(at(2, 0)).is_none());
         assert!(display.key_origin(at(0, 3)).is_none());
+    }
+
+    #[test]
+    fn cells_count_row_major_from_the_top_left() {
+        let grid = KeyGrid { rows: 2, cols: 3 };
+        assert_eq!(grid.cell(0), at(0, 0));
+        assert_eq!(grid.cell(2), at(0, 2));
+        assert_eq!(grid.cell(3), at(1, 0));
+        assert_eq!(grid.cell(5), at(1, 2));
+        assert!(!grid.contains(grid.cell(6)));
     }
 
     #[test]
