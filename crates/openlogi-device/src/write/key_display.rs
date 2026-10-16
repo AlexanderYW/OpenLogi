@@ -13,7 +13,9 @@
 //! with big-endian `u16` fields and the JPEG from byte 20; continuation
 //! packets carry the rest from byte 5. `part` is the packet's 1-based index
 //! `| 0x20`, `| 0x80` on the first packet and `| 0x40` on the last. The device
-//! acknowledges the image with a `13 ff 02 2b …` report.
+//! acknowledges the image with `13 ff 02 2b [part] [status…]`: the last
+//! packet's part byte without its `0x20` marker, then `00 01` when it took the
+//! image.
 //!
 //! The layout follows `node-logitech-mx-creative-console` (MIT), and was
 //! verified on hardware with `openlogi-hid`'s `mx_keypad_lcd_probe` (2026-10):
@@ -40,6 +42,11 @@ const IMAGE_HEADER: [u8; 4] = output_header(VendorFunction::Image);
 const PACKET_LEN: usize = 4095;
 const FIRST_HEADER_LEN: usize = 20;
 const NEXT_HEADER_LEN: usize = 5;
+/// Marks every part byte; the acknowledgement echoes the part without it.
+const PART_MARKER: u8 = 0x20;
+/// The status bytes after the echoed part when the device took the image —
+/// the only status the hardware has been seen to send.
+const ACK_ACCEPTED: [u8; 2] = [0x00, 0x01];
 /// How long the device may take to acknowledge an image after its last
 /// packet. Acknowledgements arrive within milliseconds on hardware.
 const ACK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -103,15 +110,18 @@ pub async fn write_key_image_on(
         .key_origin(key.position())
         .ok_or_else(|| WriteError::Hidpp(format!("{key:?} is off the panel's key grid")))?;
     let packets = image_packets(origin, display.key_size, image);
+    // `image_packets` always yields the first packet; the ack echoes the
+    // last one's part.
+    let ack_part = packets[packets.len() - 1][4] & !PART_MARKER;
 
     let channel = shared.channel();
     let (ack_tx, ack_rx) = oneshot::channel();
     let ack_tx = std::sync::Mutex::new(Some(ack_tx));
     let _ack_listener = channel.add_raw_report_listener_guarded(move |report| {
-        if is_image_ack(report)
+        if let Some(ack) = image_ack(report, ack_part)
             && let Some(tx) = ack_tx.lock().ok().and_then(|mut slot| slot.take())
         {
-            let _ = tx.send(());
+            let _ = tx.send(ack);
         }
     });
 
@@ -138,6 +148,11 @@ pub async fn write_key_image_on(
         .and_then(Result::ok)
         .ok_or(WriteError::RequestTimedOut {
             operation: HidppOperation::WriteKeyImage,
+        })?
+        .map_err(|[high, low]| {
+            WriteError::Hidpp(format!(
+                "keypad refused the key image: status {high:02x} {low:02x}"
+            ))
         })?;
     debug!(
         ?key,
@@ -148,14 +163,27 @@ pub async fn write_key_image_on(
     Ok(())
 }
 
-/// Whether `report` acknowledges an image write.
-fn is_image_ack(report: &[u8]) -> bool {
-    input_payload(report, VendorFunction::Image).is_some()
+/// The device's answer in `report` to the image write whose acknowledgement
+/// echoes `ack_part`: `Ok` when it took the image, `Err` with the status it
+/// sent otherwise, and `None` when `report` answers anything else — another
+/// function, another write's part, or a header cut short.
+fn image_ack(report: &[u8], ack_part: u8) -> Option<Result<(), [u8; 2]>> {
+    match input_payload(report, VendorFunction::Image)? {
+        [part, high, low, ..] if *part == ack_part => {
+            let status = [*high, *low];
+            Some(if status == ACK_ACCEPTED {
+                Ok(())
+            } else {
+                Err(status)
+            })
+        }
+        _ => None,
+    }
 }
 
 /// The part byte of packet `index` (1-based) of a write of `count` packets.
 fn part_byte(index: u8, count: usize) -> u8 {
-    let mut byte = index | 0x20;
+    let mut byte = index | PART_MARKER;
     if index == 1 {
         byte |= 0x80;
     }
