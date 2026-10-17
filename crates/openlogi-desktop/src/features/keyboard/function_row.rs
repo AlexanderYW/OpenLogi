@@ -427,13 +427,19 @@ fn key_slots_from_layouts(
     state: Option<&AppState>,
     page: KeypadPage,
 ) -> Vec<KeySlot> {
+    let key_actions = state.map(AppState::keypad_key_actions).unwrap_or_default();
     surface
         .slots()
         .into_iter()
         .enumerate()
         .map(|(idx, mut layout)| {
             layout.target = layout.target.on_page(page);
-            let bound = state.and_then(|state| bound_action(state, &layout.target));
+            let bound = match &layout.target {
+                // The face the keypad shows, which a long press can set
+                // without a press action.
+                KeyTarget::Grid(slot) => key_actions.get(&ButtonId::Grid(*slot)).cloned(),
+                target => state.and_then(|state| bound_action(state, target)),
+            };
             KeySlot {
                 idx,
                 label: layout.legend.into(),
