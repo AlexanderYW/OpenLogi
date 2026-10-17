@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::ForegroundApp;
-use openlogi_core::binding::{Action, ActionRingIcon, Binding, ButtonId, GridKey, KeypadPage};
+use openlogi_core::binding::{ActionRingIcon, Binding, ButtonId, GridKey, KeypadPage};
 use openlogi_core::bindings::{bindings_on_page, button_bindings_for, oshook_gestures_for};
 use openlogi_core::config::{
     Config, ConfigRevision, LightSettings, MouseProfileTarget, canonical_device_key,
@@ -1590,32 +1590,28 @@ struct KeyboardDivertSet {
     grid: BTreeMap<u8, ButtonId>,
 }
 
-/// Whether a keyboard control or keypad grid key carries a real action. A
-/// [`Binding::LongPress`] is bound whatever its arms hold; a single binding is
-/// bound unless it is [`Action::None`], the "leave native" value. The capture
-/// set and a keypad key's face both decide "does this key do anything" here.
+/// Whether a keyboard control or keypad grid key carries a real action
+/// ([`Binding::key_action`]). The capture set and a keypad key's face both
+/// decide "does this key do anything" there.
 fn is_bound_key(binding: &Binding) -> bool {
-    matches!(binding, Binding::LongPress(_)) || binding.click_action() != Action::None
+    binding.key_action().is_some()
 }
 
 /// What a keypad grid key shows for `binding`: blank exactly when the key does
-/// nothing, else the glyph of its press action — a long press's short action,
-/// or its long one when only that is set.
+/// nothing, else the glyph of [`Binding::key_action`].
 fn key_face(binding: Option<&Binding>) -> KeyFace {
-    let Some(binding) = binding.filter(|binding| is_bound_key(binding)) else {
-        return KeyFace::Blank;
-    };
-    let action = match binding {
-        Binding::LongPress(press) if *press.short() == Action::None => press.long().clone(),
-        _ => binding.click_action(),
-    };
-    KeyFace::Icon(ActionRingIcon::for_action(&action))
+    binding
+        .and_then(Binding::key_action)
+        .map_or(KeyFace::Blank, |action| {
+            KeyFace::Icon(ActionRingIcon::for_action(&action))
+        })
 }
 
 /// Which of `bindings` the keyboard capture session takes over.
 ///
 /// A control is diverted whenever it is stored at all, even as
-/// [`Action::None`] (which means "suppress this key," not "leave native"):
+/// [`Action::None`](openlogi_core::binding::Action::None) (which means
+/// "suppress this key," not "leave native"):
 /// `button_bindings_for` seeds no default for a [`ButtonId::Control`], so
 /// presence here is always an explicit user choice (#1747). A keypad grid key
 /// is only observed — the session never diverts it, so it cannot suppress the

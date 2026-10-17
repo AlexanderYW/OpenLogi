@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use openlogi_core::binding::{
     Action, Binding, ButtonId, GestureDirection, KeypadPage, WheelHoldBinding,
 };
-use openlogi_core::bindings::{bindings_for, hidpp_gesture_maps_for, oshook_gestures_for};
+use openlogi_core::bindings::{
+    bindings_for, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
+};
 use openlogi_core::config::{Config, KeyTrigger};
 use tracing::debug;
 
@@ -200,6 +202,24 @@ impl AppState {
         self.current_record()
             .and_then(DeviceRecord::persistent_config_key)
             .map_or(KeypadPage::FIRST, |key| self.config.keypad_pages(key))
+    }
+
+    /// What each of the selected keypad's grid keys shows in the open
+    /// profile ([`Binding::key_action`]) — the face the agent paints on its
+    /// LCD. A key that does nothing is absent.
+    ///
+    /// Unlike [`Self::button_bindings`], a long press with only its long arm
+    /// set shows that arm.
+    #[must_use]
+    pub fn keypad_key_actions(&self) -> BTreeMap<ButtonId, Action> {
+        let key = self
+            .current_record()
+            .and_then(DeviceRecord::persistent_config_key);
+        button_bindings_for(&self.config, key, self.editing_app())
+            .into_iter()
+            .filter(|(button, _)| button.grid_slot().is_some())
+            .filter_map(|(button, binding)| Some((button, binding.key_action()?)))
+            .collect()
     }
 
     /// Whether the selected keypad binds any key on `page` in any profile —

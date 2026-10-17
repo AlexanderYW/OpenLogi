@@ -971,3 +971,19 @@ fn mouse_buttons_sort_ahead_of_every_keyboard_control() {
     }
     assert_eq!(default_binding(ButtonId::control(0x01f3)), Action::None);
 }
+
+#[test]
+fn a_key_shows_its_press_action_or_nothing_when_unbound() {
+    let long_press = |short, long| Binding::LongPress(LongPressBinding::new(short, long));
+    let cases = [
+        (Binding::Single(Action::None), None),
+        (Binding::Single(Action::Copy), Some(Action::Copy)),
+        (long_press(Action::Copy, Action::Paste), Some(Action::Copy)),
+        (long_press(Action::None, Action::Paste), Some(Action::Paste)),
+        // A long press does something whatever its arms hold.
+        (long_press(Action::None, Action::None), Some(Action::None)),
+    ];
+    for (binding, shown) in cases {
+        assert_eq!(binding.key_action(), shown, "{binding:?}");
+    }
+}
