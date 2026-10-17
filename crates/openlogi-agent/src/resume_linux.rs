@@ -8,7 +8,6 @@
 use std::thread;
 use std::time::Duration;
 
-use openlogi_agent_core::watchers::retry::Backoff;
 use openlogi_hid::DeviceIoSignal;
 use tracing::{debug, info, warn};
 use zbus::blocking::Connection;
@@ -34,15 +33,15 @@ pub fn register(signal: DeviceIoSignal) {
     let spawned = thread::Builder::new()
         .name("openlogi-linux-resume".into())
         .spawn(move || {
-            let mut reconnect = Backoff::new(RECONNECT_DELAY, MAX_RECONNECT_DELAY);
+            let mut reconnect_delay = RECONNECT_DELAY;
             loop {
                 let failed = match listen(&signal) {
                     Ok(()) => {
                         warn!("logind resume signal stream ended; reconnecting");
-                        reconnect.reset();
+                        reconnect_delay = RECONNECT_DELAY;
                         false
                     }
-                    Err(error) if reconnect.is_initial() => {
+                    Err(error) if reconnect_delay == RECONNECT_DELAY => {
                         warn!(%error, "logind resume listener failed; reconnecting");
                         true
                     }
@@ -51,9 +50,9 @@ pub fn register(signal: DeviceIoSignal) {
                         true
                     }
                 };
-                thread::sleep(reconnect.delay());
+                thread::sleep(reconnect_delay);
                 if failed {
-                    reconnect.failed();
+                    reconnect_delay = next_reconnect_delay(reconnect_delay);
                 }
             }
         });
@@ -76,4 +75,22 @@ fn listen(signal: &DeviceIoSignal) -> zbus::Result<()> {
         }
     }
     Ok(())
+}
+
+fn next_reconnect_delay(current: Duration) -> Duration {
+    current.saturating_mul(2).min(MAX_RECONNECT_DELAY)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_RECONNECT_DELAY, RECONNECT_DELAY, next_reconnect_delay};
+
+    #[test]
+    fn reconnect_backoff_is_bounded() {
+        let mut delay = RECONNECT_DELAY;
+        for _ in 0..10 {
+            delay = next_reconnect_delay(delay);
+        }
+        assert_eq!(delay, MAX_RECONNECT_DELAY);
+    }
 }
