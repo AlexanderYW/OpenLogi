@@ -19,9 +19,7 @@ pub struct DpiArgs {
     /// Run against the device whose name contains this string
     /// (case-insensitive) instead of auto-selecting. Useful when several
     /// devices are paired (e.g. a mouse and a keyboard over Bluetooth).
-    /// An exact route as the device list prints it — `direct 046d:c354
-    /// (serial:…)` — picks one of two identical devices.
-    #[arg(long, value_name = "NAME|ROUTE")]
+    #[arg(long, value_name = "NAME")]
     pub device: Option<String>,
 }
 

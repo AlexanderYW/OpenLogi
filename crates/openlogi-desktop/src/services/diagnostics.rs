@@ -254,7 +254,6 @@ mod connection_for_tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc356, // the USB slot in model_ids
-            identity: None,
         };
         assert_eq!(
             connection_for(Some(&route), Some(&model)),
@@ -270,7 +269,6 @@ mod connection_for_tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb38a, // the BTLE slot in model_ids
-            identity: None,
         };
         assert_eq!(
             connection_for(Some(&route), Some(&model)),
@@ -287,7 +285,6 @@ mod connection_for_tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xdead, // matches none of model_ids
-            identity: None,
         };
         // No live match: falls back to the old best-effort guess from the
         // static transport flags (bluetooth/btle preferred there too).
@@ -302,7 +299,6 @@ mod connection_for_tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc356,
-            identity: None,
         };
         assert_eq!(connection_for(Some(&route), None), ConnectionKind::Unknown);
     }

@@ -14,7 +14,6 @@ fn keypad(product_id: u16) -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id,
-        identity: None,
     }
 }
 

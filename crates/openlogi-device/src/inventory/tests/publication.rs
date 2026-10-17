@@ -55,7 +55,6 @@ fn settled_direct_inventory_publishes_one_direct_route() {
         vec![DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
-            identity: None,
         }]
     );
 }

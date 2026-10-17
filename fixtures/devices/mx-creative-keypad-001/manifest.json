@@ -100,13 +100,6 @@
         "field": "device_serial_number"
        },
        "count": 1
-      },
-      {
-       "location": {
-        "asset": "profile",
-        "field": "direct_route_identity"
-       },
-       "count": 1
       }
      ]
     }

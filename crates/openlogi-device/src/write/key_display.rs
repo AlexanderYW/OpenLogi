@@ -58,7 +58,6 @@ pub fn key_display_for(route: &DeviceRoute) -> Option<KeyDisplay> {
     let DeviceRoute::Direct {
         vendor_id,
         product_id,
-        ..
     } = route
     else {
         return None;
