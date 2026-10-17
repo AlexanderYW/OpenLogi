@@ -135,6 +135,7 @@ impl ArmedReplay {
         let route = DeviceRoute::Direct {
             vendor_id: crate::LOGITECH_VENDOR_ID,
             product_id: DIRECT_PRODUCT_ID,
+            identity: None,
         };
         let backend = Arc::new(
             ReplayBackend::new(

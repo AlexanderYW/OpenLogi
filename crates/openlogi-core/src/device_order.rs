@@ -7,6 +7,8 @@
 //! excludes standalone raw-HID devices when choosing its input-capture target;
 //! they remain ordered here for inventory, display, and settings re-apply.
 
+use serde::{Deserialize, Serialize};
+
 use crate::hid::DeviceRoute;
 
 /// A configuration key backed by enough information to identify one physical
@@ -65,7 +67,10 @@ pub enum DeviceStableId {
 }
 
 /// A device's own identity, used to disambiguate two same-model direct devices.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// Rides the IPC wire inside [`DeviceRoute::Direct`], so its variants are
+/// append-only (see `crates/openlogi-ipc/AGENTS.md`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DeviceIdentity {
     /// Case-folded serial number.
     Serial(String),
@@ -74,6 +79,14 @@ pub enum DeviceIdentity {
 }
 
 impl DeviceIdentity {
+    /// The identity a device's serial or unit id proves, or `None` when it
+    /// reports neither a non-empty serial nor a non-zero unit id — the one
+    /// rule for whether a device can be told apart from a same-model twin.
+    #[must_use]
+    pub fn physical(serial: Option<&str>, unit_id: [u8; 4]) -> Option<Self> {
+        Some(Self::from_parts(serial, unit_id)).filter(Self::is_physical)
+    }
+
     /// Prefer the serial number (case-folded) when present, else the unit id.
     #[must_use]
     pub fn from_parts(serial: Option<&str>, unit_id: [u8; 4]) -> Self {
@@ -107,6 +120,7 @@ impl DeviceStableId {
             Some(DeviceRoute::Direct {
                 vendor_id,
                 product_id,
+                ..
             }) => Self::Direct {
                 vendor_id: *vendor_id,
                 product_id: *product_id,
@@ -399,6 +413,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb023,
+            identity: None,
         };
         let id = DeviceStableId::from_parts(Some(&route), 0xff, None, [0; 4]);
 
@@ -413,6 +428,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb023,
+            identity: None,
         };
         let key = DeviceStableId::from_parts(Some(&route), 0xff, Some("ABCDEF"), [0; 4])
             .physical_key()
@@ -426,6 +442,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb023,
+            identity: None,
         };
         let key = DeviceStableId::from_parts(Some(&route), 0xff, None, [0xa3, 0x93, 0xca, 0xe0])
             .physical_key()

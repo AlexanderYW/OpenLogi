@@ -143,16 +143,32 @@ fn no_match_err(devices: &[Candidate], query: Option<&str>) -> anyhow::Error {
         Some(q) => anyhow!("no online device matches `--device {q}`.\n  online devices:\n{list}"),
         None => anyhow!(
             "could not pick a device automatically.\n  online devices:\n{list}\n  \
-             pass --device <name> to choose one."
+             pass --device <name or route> to choose one."
         ),
     }
+}
+
+/// The device `--device query` names: one whose rendered route it spells out
+/// exactly — the only way to tell two identical devices apart, since their
+/// names match — else the first whose name contains it. Both ignore case.
+fn device_for_query<'a>(devices: &'a [Candidate], query: &str) -> Option<&'a Candidate> {
+    devices
+        .iter()
+        .find(|c| c.route.to_string().eq_ignore_ascii_case(query))
+        .or_else(|| {
+            let needle = query.to_lowercase();
+            devices
+                .iter()
+                .find(|c| c.name.to_lowercase().contains(&needle))
+        })
 }
 
 /// Pick the device a diag should run against.
 ///
 /// Selection order:
-/// 1. If `query` is set, the first online device whose name contains it
-///    (case-insensitive) — lets the user disambiguate explicitly.
+/// 1. If `query` is set, the online device whose rendered route it spells out,
+///    else the first whose name contains it (case-insensitive) — lets the
+///    user disambiguate explicitly, down to one of two identical devices.
 /// 2. Else, if `required_features` is non-empty, the first online device whose
 ///    HID++ feature table exposes *any* of them. This is what stops a
 ///    mouse-only diag (DPI, SmartShift) from picking a paired keyboard when
@@ -166,10 +182,7 @@ pub(crate) async fn select_device(
     let devices = online_devices().await?;
 
     if let Some(q) = query {
-        let needle = q.to_lowercase();
-        return devices
-            .iter()
-            .find(|c| c.name.to_lowercase().contains(&needle))
+        return device_for_query(&devices, q)
             .map(|c| (c.route.clone(), c.name.clone()))
             .ok_or_else(|| no_match_err(&devices, query));
     }
@@ -212,16 +225,46 @@ mod tests {
     };
     use openlogi_hid::{DIRECT_DEVICE_INDEX, DeviceRoute};
 
-    use super::{Candidate, no_match_err, online_candidates};
+    use openlogi_core::device_order::DeviceIdentity;
+
+    use super::{Candidate, device_for_query, no_match_err, online_candidates};
 
     fn candidate(name: &str) -> Candidate {
         Candidate {
             route: DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc539,
+                identity: None,
             },
             name: name.to_string(),
         }
+    }
+
+    /// One of two identical keypads, named by `unit`.
+    fn keypad(unit: u8) -> Candidate {
+        Candidate {
+            route: DeviceRoute::Direct {
+                vendor_id: 0x046d,
+                product_id: 0xc354,
+                identity: Some(DeviceIdentity::Unit([0, 0, 0, unit])),
+            },
+            name: "MX Keypad".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_exact_route_picks_one_of_two_identical_devices() {
+        let devices = [keypad(1), keypad(2)];
+
+        let picked = device_for_query(&devices, "DIRECT 046d:c354 (unit:00000002)")
+            .expect("the second keypad's route names it");
+        assert_eq!(picked.route, keypad(2).route);
+        assert_eq!(
+            device_for_query(&devices, "keypad").map(|c| &c.route),
+            Some(&keypad(1).route),
+            "a name still matches the first device that carries it"
+        );
+        assert!(device_for_query(&devices, "direct 046d:c354 (unit:00000009)").is_none());
     }
 
     #[test]
@@ -259,7 +302,7 @@ mod tests {
         let err = no_match_err(&devices, None).to_string();
 
         assert!(err.contains("could not pick a device automatically"));
-        assert!(err.contains("pass --device <name> to choose one"));
+        assert!(err.contains("pass --device <name or route> to choose one"));
         assert!(err.contains("MX Master 3S"));
     }
 
@@ -305,6 +348,7 @@ mod tests {
             DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc095,
+                identity: None,
             }
         );
         assert_eq!(candidates[0].route.device_index(), DIRECT_DEVICE_INDEX);

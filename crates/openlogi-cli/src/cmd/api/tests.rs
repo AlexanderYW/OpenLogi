@@ -178,7 +178,7 @@ async fn inventory_projects_mixed_devices_without_unrelated_private_state() {
     assert_eq!(devices[0]["capabilities"]["pointer"], true);
     assert_eq!(devices[1]["online"], false);
     assert_eq!(devices[1]["battery"], Value::Null);
-    assert_eq!(devices[3]["id"], "direct 046d:b020");
+    assert_eq!(devices[3]["id"], "direct 046d:b020 (unit:4f4c4403)");
     assert_eq!(devices[3]["battery"]["percentage"], 55);
     assert_eq!(devices[4]["kind"], "light");
     assert_eq!(devices[4]["battery"], Value::Null);
