@@ -28,7 +28,9 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
-use super::retry::{Backoff, RETRY_DELAY, wait_for_deadline};
+use backon::{BackoffBuilder as _, ExponentialBackoff, ExponentialBuilder};
+
+use super::retry::{RETRY_DELAY, wait_for_deadline};
 use super::shutdown::{ManagerCompletion, WatcherHandle};
 use crate::hardware::DeviceAccess;
 
@@ -74,13 +76,20 @@ struct PaintedPanel {
     faces: BTreeMap<GridKey, KeyFace>,
 }
 
+/// The next delay `backoff` yields. It is built without a retry limit, so it
+/// never runs out; the cap stands in if it somehow did.
+fn next_delay(backoff: &mut ExponentialBackoff) -> Duration {
+    backoff.next().unwrap_or(MAX_RETRY_DELAY)
+}
+
 /// A keypad whose image writes keep failing, and when to try it again.
 #[derive(Debug)]
 struct FailingPanel {
     route: DeviceRoute,
     /// The generation the failures happened in: a moved one clears them.
     generation: u64,
-    backoff: Backoff,
+    /// Doubling delays from [`RETRY_DELAY`] up to `MAX_RETRY_DELAY`.
+    backoff: ExponentialBackoff,
     retry_at: Instant,
 }
 
@@ -176,16 +185,20 @@ impl Painted {
             .iter_mut()
             .find(|failing| failing.route == spec.route)
         {
-            failing.backoff.failed();
-            failing.retry_at = now + failing.backoff.delay();
+            failing.retry_at = now + next_delay(&mut failing.backoff);
             return false;
         }
-        let backoff = Backoff::new(RETRY_DELAY, MAX_RETRY_DELAY);
+        let mut backoff = ExponentialBuilder::new()
+            .with_min_delay(RETRY_DELAY)
+            .with_max_delay(MAX_RETRY_DELAY)
+            .without_max_times()
+            .build();
+        let retry_at = now + next_delay(&mut backoff);
         self.failing.push(FailingPanel {
             route: spec.route.clone(),
             generation: spec.generation,
             backoff,
-            retry_at: now + backoff.delay(),
+            retry_at,
         });
         true
     }

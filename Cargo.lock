@@ -5588,6 +5588,7 @@ name = "openlogi-agent-core"
 version = "0.8.16"
 dependencies = [
  "axwatch",
+ "backon",
  "futures-lite",
  "image",
  "openlogi-core",

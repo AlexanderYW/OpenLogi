@@ -17,6 +17,6 @@ pub mod light;
 pub mod pairing;
 pub mod pointer;
 mod poll;
-pub mod retry;
+mod retry;
 pub mod secure_input;
 pub mod shutdown;
