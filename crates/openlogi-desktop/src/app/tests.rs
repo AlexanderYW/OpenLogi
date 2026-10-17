@@ -384,6 +384,7 @@ fn connection_icon_matches_route() {
     let direct_wired_pid = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb019,
+        identity: None,
     };
     assert_eq!(
         connection_icon_path(
@@ -402,6 +403,7 @@ fn connection_icon_matches_route() {
     let direct_equad_pid = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb01a,
+        identity: None,
     };
     assert_eq!(
         connection_icon_path(
@@ -415,6 +417,7 @@ fn connection_icon_matches_route() {
     let direct_unknown_pid = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xffff,
+        identity: None,
     };
     assert_eq!(
         connection_icon_path(
@@ -519,10 +522,12 @@ fn connection_icon_follows_live_route_on_multi_transport_device() {
     let usb_direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc356,
+        identity: None,
     };
     let btle_direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb38a,
+        identity: None,
     };
     assert_eq!(
         connection_icon_path(Some(&usb_direct), Some(&model), None),
@@ -713,6 +718,7 @@ fn live_bluetooth_icon_does_not_use_a_saved_usb_transport() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb389,
+        identity: None,
     };
     assert_eq!(
         connection_icon_path(

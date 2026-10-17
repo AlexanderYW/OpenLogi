@@ -161,6 +161,7 @@ async fn finish(args: ContributeArgs, state_path: &Path) -> Result<()> {
     println!("Step 2/2: Agent must be stopped; selecting the same structural target…");
     let target = record_case::prepare_contribution_target(args.device.as_deref()).await?;
     require_same_structural_route(&state.selected_route, target.route())?;
+    require_no_structural_twin(target.route(), target.peer_routes())?;
     let identity_plan = identity_plan(&profile, &state.selected_route)?;
 
     let mut cassettes = Vec::with_capacity(FixtureOperation::ALL.len());
@@ -395,7 +396,36 @@ fn add_model_identities(plan: &mut HidCassetteIdentityPlan, model: &DeviceModelI
 }
 
 fn require_same_structural_route(expected: &DeviceRoute, actual: &DeviceRoute) -> Result<()> {
-    let matches = match (expected, actual) {
+    if structurally_same(expected, actual) {
+        Ok(())
+    } else {
+        bail!(
+            "the selected direct-capture target does not match the profile transport and slot; \
+             reconnect the same device and use the same --device selector"
+        )
+    }
+}
+
+/// Refuse capture while another online device shares the target's structural
+/// route — an identical twin. The profile step saved only synthetic
+/// identities, and a private identifier (or its hash) must never be kept, so
+/// nothing could prove this step reached the same twin as that one.
+fn require_no_structural_twin(target: &DeviceRoute, peers: &[DeviceRoute]) -> Result<()> {
+    if peers.iter().any(|peer| structurally_same(target, peer)) {
+        bail!(
+            "another connected device has the same model and connection as the target, and the \
+             two contribution steps cannot be proven to reach the same one; disconnect the \
+             other device and rerun the same command"
+        );
+    }
+    Ok(())
+}
+
+/// Whether two routes reach the same transport position, ignoring every
+/// identity they carry — the profile step's are synthetic, a live route's
+/// are private.
+fn structurally_same(expected: &DeviceRoute, actual: &DeviceRoute) -> bool {
+    match (expected, actual) {
         (DeviceRoute::Bolt { slot: left, .. }, DeviceRoute::Bolt { slot: right, .. })
         | (DeviceRoute::Unifying { slot: left, .. }, DeviceRoute::Unifying { slot: right, .. }) => {
             left == right
@@ -404,10 +434,12 @@ fn require_same_structural_route(expected: &DeviceRoute, actual: &DeviceRoute) -
             DeviceRoute::Direct {
                 vendor_id: left_vendor,
                 product_id: left_product,
+                ..
             },
             DeviceRoute::Direct {
                 vendor_id: right_vendor,
                 product_id: right_product,
+                ..
             },
         ) => left_vendor == right_vendor && left_product == right_product,
         (
@@ -432,14 +464,6 @@ fn require_same_structural_route(expected: &DeviceRoute, actual: &DeviceRoute) -
                 && left_usage == right_usage
         }
         _ => false,
-    };
-    if matches {
-        Ok(())
-    } else {
-        bail!(
-            "the selected direct-capture target does not match the profile transport and slot; \
-             reconnect the same device and use the same --device selector"
-        )
     }
 }
 
@@ -545,6 +569,30 @@ mod tests {
         require_same_structural_route(&expected, &wrong_slot).expect_err("slot is retained");
     }
 
+    /// An identical twin online during capture is refused: the profile step
+    /// kept no private identity, so nothing could tell which twin it read. A
+    /// different model alongside the target is fine.
+    #[test]
+    fn capture_refuses_while_an_identical_twin_is_connected() {
+        let keypad = |unit| DeviceRoute::Direct {
+            vendor_id: 0x046d,
+            product_id: 0xc354,
+            identity: Some(openlogi_core::device_order::DeviceIdentity::Unit([
+                0, 0, 0, unit,
+            ])),
+        };
+        let keyboard = DeviceRoute::Direct {
+            vendor_id: 0x046d,
+            product_id: 0xb35b,
+            identity: None,
+        };
+
+        require_no_structural_twin(&keypad(1), std::slice::from_ref(&keyboard))
+            .expect("another model is not a twin");
+        require_no_structural_twin(&keypad(1), &[keyboard, keypad(2)])
+            .expect_err("a same-model twin makes the target unprovable");
+    }
+
     #[test]
     fn resumable_state_contains_only_synthetic_route_data() {
         let state = ContributionState {
@@ -587,6 +635,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: profile.inventories[1].receiver.vendor_id,
             product_id: profile.inventories[1].receiver.product_id,
+            identity: None,
         };
         let model = profile.inventories[1].paired[0]
             .model_info
