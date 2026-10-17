@@ -24,6 +24,7 @@ mod channel_cache;
 pub mod events;
 mod features;
 pub mod hid_only;
+pub(crate) use features::read_device_identity;
 pub mod hotplug;
 mod ledger;
 mod mappings;

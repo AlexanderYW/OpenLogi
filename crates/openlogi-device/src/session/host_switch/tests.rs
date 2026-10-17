@@ -379,6 +379,7 @@ fn direct_route() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb35b,
+        identity: None,
     }
 }
 
@@ -484,6 +485,7 @@ fn direct_devices_do_not_share_channels() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb025,
+        identity: None,
     };
     assert!(!shares_channel(&route, &route));
 }

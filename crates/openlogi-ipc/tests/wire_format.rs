@@ -44,6 +44,7 @@ use openlogi_core::device::{
     DeviceKind, DeviceModelInfo, DeviceTransports, LightCapabilities, LightState, LightValueRange,
     LightValueUnit, LockKey, PairedDevice, RawDeviceAddress, ReceiverInfo, StandaloneDevice,
 };
+use openlogi_core::device_order::DeviceIdentity;
 use openlogi_core::hid::{
     BacklightChange, BacklightControls, BacklightDuration, BacklightMode, BacklightState,
     BacklightStatus, Click, DeviceRoute, DisableKeysMask, DisableKeysState, Dpi, DpiCapabilities,
@@ -129,6 +130,27 @@ fn config_reload_result() {
     assert_wire(&error, "03626164");
     assert_wire(&Ok::<(), ConfigReloadError>(()), "00");
     assert_wire(&Err::<(), ConfigReloadError>(error), "0103626164");
+}
+
+/// A direct route carries the device's own identity after its VID/PID, so two
+/// identical wired devices are two routes; `DeviceIdentity` is append-only
+/// from here on.
+#[test]
+fn direct_route_carries_device_identity() {
+    let direct = |identity| DeviceRoute::Direct {
+        vendor_id: 0x046d,
+        product_id: 0xc354,
+        identity,
+    };
+    assert_wire(&direct(None), "02fb6d04fb54c300");
+    assert_wire(
+        &direct(Some(DeviceIdentity::Serial("ol-ser-00001".into()))),
+        "02fb6d04fb54c301000c6f6c2d7365722d3030303031",
+    );
+    assert_wire(
+        &direct(Some(DeviceIdentity::Unit([0x4f, 0x4c, 0x44, 0x01]))),
+        "02fb6d04fb54c301014f4c4401",
+    );
 }
 
 /// tarpc encodes the request enum's variant index, so trait *method order* is
@@ -386,6 +408,7 @@ fn sidetone_calls() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0x0ac4,
+        identity: None,
     };
     let level = SidetoneLevel::try_new(40).expect("a level in range");
     assert_wire(&HidppOperation::ReadSidetone, "1f");
@@ -396,11 +419,11 @@ fn sidetone_calls() {
         &AgentRequest::ReadSidetone {
             route: route.clone(),
         },
-        "3102fb6d04fbc40a",
+        "3102fb6d04fbc40a00",
     );
     assert_wire(
         &AgentRequest::SetSidetone { route, level },
-        "3202fb6d04fbc40a28",
+        "3202fb6d04fbc40a0028",
     );
     assert_wire(&AgentResponse::SetSidetone(Ok(level)), "320028");
 }

@@ -197,6 +197,7 @@ async fn keyboard_channel(keyboard: &Arc<Mutex<Keyboard>>) -> SharedChannel {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb378,
+            identity: None,
         },
     )
 }

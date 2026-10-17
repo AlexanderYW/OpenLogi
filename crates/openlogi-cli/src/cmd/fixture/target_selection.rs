@@ -58,10 +58,31 @@ fn selection_error<T: FixtureTarget>(message: &str, candidates: &[T]) -> anyhow:
             list,
             "\n  - {:?} ({})",
             candidate.display_name(),
-            safe_route_label(candidate.route())
+            candidate_route_label(candidate, candidates)
         );
     }
     anyhow!("{message}. Candidates:{list}")
+}
+
+/// How `candidate`'s route is listed: the privacy-safe label, unless it is a
+/// direct device another candidate would list the same way — an identical
+/// twin. Only then is the full rendered route, identity and all, shown: it is
+/// the one `--device` value that tells them apart, so it must be typeable.
+/// Receiver routes never fall back: two devices on the same slot of different
+/// receivers would otherwise print their receiver UIDs.
+fn candidate_route_label<T: FixtureTarget>(candidate: &T, candidates: &[T]) -> String {
+    let label = safe_route_label(candidate.route());
+    let twinned = matches!(candidate.route(), DeviceRoute::Direct { .. })
+        && candidates
+            .iter()
+            .filter(|other| safe_route_label(other.route()) == label)
+            .count()
+            > 1;
+    if twinned {
+        candidate.route().to_string()
+    } else {
+        label
+    }
 }
 
 fn safe_route_label(route: &DeviceRoute) -> String {
@@ -71,6 +92,7 @@ fn safe_route_label(route: &DeviceRoute) -> String {
         DeviceRoute::Direct {
             vendor_id,
             product_id,
+            ..
         } => format!("direct {vendor_id:04x}:{product_id:04x}"),
         DeviceRoute::RawHid {
             vendor_id,

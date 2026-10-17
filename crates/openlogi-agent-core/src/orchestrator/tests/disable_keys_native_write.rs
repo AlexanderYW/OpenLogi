@@ -32,6 +32,7 @@ impl Keyboard {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let disabled = Arc::new(AtomicU8::new(0x80));
         let device_disabled = Arc::clone(&disabled);

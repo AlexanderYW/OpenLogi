@@ -77,6 +77,7 @@ async fn headset_channel(headset: &Arc<Mutex<Headset>>) -> SharedChannel {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0x0ac4,
+        identity: None,
     };
     SharedChannel::new(scripted_channel(raw).await, route)
 }

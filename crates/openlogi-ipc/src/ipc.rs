@@ -177,6 +177,8 @@ pub use succession::Identity;
 ///      `Agent::{read_flow_identity, start_flow_pairing, pair_flow_peer,
 ///      confirm_flow_pairing, cancel_flow_pairing, stop_flow_pairing}`
 ///      appended after those — pairing another computer for Flow.
+///      `DeviceRoute::Direct` gains an `identity` (`DeviceIdentity`, newly
+///      on the wire) — two identical wired devices are two routes.
 pub const PROTOCOL_VERSION: u32 = 44;
 
 /// Environment variable through which the agent hands a supervised helper the

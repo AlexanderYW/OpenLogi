@@ -187,6 +187,7 @@ fn an_adopted_card_takes_its_receiver_family_from_the_live_route() {
     let cable = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc08d,
+        identity: None,
     };
     let mut live = online_record("direct:046d:c08d:6be9d300");
     live.route = Some(cable.clone());

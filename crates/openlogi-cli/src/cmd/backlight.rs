@@ -20,6 +20,7 @@ use tarpc::context;
 
 use crate::agent::{self, CallFailure};
 use crate::cmd::api::Switch;
+use crate::cmd::device_query::devices_named;
 
 #[derive(Debug, Args)]
 #[command(
@@ -28,7 +29,9 @@ use crate::cmd::api::Switch;
 pub struct BacklightArgs {
     /// Select exactly one online device by a case-insensitive name substring.
     /// Refuses ambiguous matches instead of choosing the first keyboard.
-    #[arg(long, value_name = "NAME", global = true)]
+    /// An exact route as the device list prints it — `direct 046d:c354
+    /// (serial:…)` — picks one of two identical devices.
+    #[arg(long, value_name = "NAME|ROUTE", global = true)]
     pub device: Option<String>,
 
     #[command(subcommand)]
@@ -194,16 +197,22 @@ fn select_device(snapshot: &AgentSnapshot, query: Option<&str>) -> Result<(Devic
                 })
         })
         .collect();
-    let needle = query.map(str::to_lowercase);
-    let matches: Vec<_> = devices
-        .iter()
-        .filter(|(_, name, caps)| {
-            needle.as_ref().map_or_else(
-                || caps.is_some_and(|caps: &Capabilities| caps.backlight),
-                |needle| name.to_lowercase().contains(needle),
-            )
-        })
-        .collect();
+    // A query resolves through the one shared matcher: the device whose
+    // rendered route it spells out, else one whose name contains it. The
+    // route is the only way to reach one of two identical wired devices,
+    // whose names match.
+    let matches: Vec<_> = match query {
+        Some(query) => devices_named(
+            &devices,
+            query,
+            |(route, _, _)| route.as_ref(),
+            |(_, name, _)| name.as_str(),
+        ),
+        None => devices
+            .iter()
+            .filter(|(_, _, caps)| caps.is_some_and(|caps: &Capabilities| caps.backlight))
+            .collect(),
+    };
     let selected = if let [selected] = matches.as_slice() {
         *selected
     } else {
@@ -225,7 +234,7 @@ fn select_device(snapshot: &AgentSnapshot, query: Option<&str>) -> Result<(Devic
             .collect::<Vec<_>>()
             .join("\n");
         bail!(
-            "{reason}; use --device <unique name substring>. Automatic selection requires measured backlight support.\nOnline HID++ devices:\n{list}"
+            "{reason}; use --device <name or exact route>. Automatic selection requires measured backlight support.\nOnline HID++ devices:\n{list}"
         );
     };
     let (route, name, caps) = selected;

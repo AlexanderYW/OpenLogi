@@ -2,7 +2,10 @@ use std::collections::VecDeque;
 use std::future::pending;
 use std::sync::{Arc, Mutex};
 
-use openlogi_core::device::{DeviceInventory, DeviceKind, PairedDevice, ReceiverInfo};
+use openlogi_core::device::{
+    DeviceInventory, DeviceKind, DeviceModelInfo, DeviceTransports, PairedDevice, ReceiverInfo,
+};
+use openlogi_core::device_order::DeviceIdentity;
 use openlogi_core::hid::WriteError;
 use openlogi_ipc::client::ProtocolSkew;
 use openlogi_ipc::testing::{Answer, in_memory_agent};
@@ -62,6 +65,19 @@ fn route() -> DeviceRoute {
     DeviceRoute::Bolt {
         receiver_uid: "test-receiver".into(),
         slot: 3,
+    }
+}
+
+/// The `0x0003` identity that makes `for_slot` render two same-model wired
+/// devices as two routes.
+fn wired_identity(unit_id: [u8; 4]) -> DeviceModelInfo {
+    DeviceModelInfo {
+        entity_count: 1,
+        serial_number: None,
+        unit_id,
+        transports: DeviceTransports::default(),
+        model_ids: [0xb35b, 0, 0],
+        extended_model_id: 0,
     }
 }
 
@@ -166,6 +182,7 @@ async fn bare_and_status_read_exact_agent_routes_without_writing_or_arming() {
             DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb35b,
+                identity: None,
             },
         ),
     ] {
@@ -333,6 +350,36 @@ async fn explicit_names_do_not_disambiguate_colliding_direct_routes() {
     snapshot.inventory.push(duplicate);
     let (result, out) = run(snapshot, Some(BacklightAction::Off), Some("Test"), vec![]).await;
     failure(result, &out, "ambiguous agent route");
+}
+
+#[tokio::test]
+async fn an_exact_route_picks_one_of_two_identical_wired_keyboards() {
+    let mut snapshot = snapshot();
+    snapshot.inventory[0].receiver.product_id = 0xb35b;
+    snapshot.inventory[0].receiver.unique_id = None;
+    snapshot.inventory[0].paired[0].slot = 255;
+    snapshot.inventory[0].paired[0].model_info = Some(wired_identity([1, 2, 3, 4]));
+    let mut twin = snapshot.inventory[0].clone();
+    twin.paired[0].model_info = Some(wired_identity([5, 6, 7, 8]));
+    snapshot.inventory.push(twin.clone());
+    // Same model, same name: a name query cannot reach just one of them.
+    let (result, out) = run(snapshot.clone(), None, Some("test"), vec![]).await;
+    failure(result, &out, "ambiguous");
+    // The rendered route the refusal lists can. The scripted read asserts the
+    // RPC carries exactly this twin's route, so its twin can never receive it.
+    let twin_route = DeviceRoute::Direct {
+        vendor_id: 0x046d,
+        product_id: 0xb35b,
+        identity: Some(DeviceIdentity::Unit([5, 6, 7, 8])),
+    };
+    let (result, _) = run(
+        snapshot,
+        None,
+        Some(&twin_route.to_string()),
+        vec![read(twin_route, state())],
+    )
+    .await;
+    result.unwrap();
 }
 
 #[tokio::test]

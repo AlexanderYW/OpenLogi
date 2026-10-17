@@ -34,6 +34,7 @@ impl DirectDevice {
             DeviceRoute::Direct {
                 vendor_id,
                 product_id,
+                ..
             } => Some(Self {
                 vendor_id,
                 product_id,

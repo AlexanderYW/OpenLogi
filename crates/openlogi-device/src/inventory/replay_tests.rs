@@ -491,6 +491,7 @@ async fn disconnected_direct_channel_replays_last_good_then_opens_a_replacement(
     let route = crate::DeviceRoute::Direct {
         vendor_id: expected.receiver.vendor_id,
         product_id: expected.receiver.product_id,
+        identity: None,
     };
     let node_id = fixture.node_id.clone();
     let backend = Arc::new(
@@ -576,6 +577,7 @@ async fn a_direct_channel_capture_reports_dead_retires_on_the_next_pass() {
     let route = crate::DeviceRoute::Direct {
         vendor_id: expected.receiver.vendor_id,
         product_id: expected.receiver.product_id,
+        identity: None,
     };
     let node_id = fixture.node_id.clone();
     let backend = Arc::new(

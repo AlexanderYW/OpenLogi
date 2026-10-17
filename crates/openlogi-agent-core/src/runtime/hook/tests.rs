@@ -630,6 +630,7 @@ fn m650_route() -> openlogi_hid::DeviceRoute {
     openlogi_hid::DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb02a,
+        identity: None,
     }
 }
 

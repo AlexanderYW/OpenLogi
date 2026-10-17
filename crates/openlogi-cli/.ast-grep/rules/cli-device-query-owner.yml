@@ -1,0 +1,23 @@
+# Owner: openlogi_cli::cmd::device_query::devices_named — how a `--device`
+# query names a device: the rendered route spelled out exactly, else a name
+# substring.
+id: cli-device-query-owner
+language: rust
+severity: error
+message: cmd/device_query.rs decides how a --device query names a device; resolve the query through devices_named instead of comparing a rendered route here.
+note: |
+  Two identical wired devices share a name, so the exact rendered route is
+  the only query that reaches one of them. When the agent-backed backlight
+  grew its own selection it kept only the name half of that decision, and a
+  named twin became unreachable again. See "Single source of truth" in
+  AGENTS.md.
+files:
+  - crates/openlogi-cli/**/*.rs
+ignores:
+  # The owner.
+  - crates/openlogi-cli/src/cmd/device_query.rs
+rule:
+  any:
+    - pattern: $R.to_string().eq_ignore_ascii_case($Q)
+    # The same comparison reached from the other side.
+    - pattern: $Q.eq_ignore_ascii_case(&$R.to_string())

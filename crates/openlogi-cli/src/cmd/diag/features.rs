@@ -73,6 +73,7 @@ fn sections(inventories: &[DeviceInventory]) -> Vec<Section> {
                     route: DeviceRoute::for_slot(inv, paired.slot).unwrap_or(DeviceRoute::Direct {
                         vendor_id: inv.receiver.vendor_id,
                         product_id: inv.receiver.product_id,
+                        identity: None,
                     }),
                     read: if paired.hidpp10 {
                         Read::Hidpp10

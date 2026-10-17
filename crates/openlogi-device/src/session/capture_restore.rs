@@ -210,7 +210,7 @@ fn kernel_diverts(route: &DeviceRoute, cid: u16) -> bool {
             == (DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb02a,
-            })
+            identity: None, })
         // The classic Back/Forward CIDs, the first of each family.
         && [reprog_controls::BACK_CIDS[0], reprog_controls::FORWARD_CIDS[0]].contains(&cid)
 }

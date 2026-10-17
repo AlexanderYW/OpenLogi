@@ -7,6 +7,7 @@ pub mod api;
 pub mod assets;
 pub mod backlight;
 pub mod camera;
+pub(crate) mod device_query;
 pub mod diag;
 pub mod fixture;
 #[cfg(target_os = "macos")]

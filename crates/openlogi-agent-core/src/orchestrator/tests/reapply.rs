@@ -9,6 +9,7 @@ fn direct_identity_enrichment_carries_the_spent_followup_budget() {
         route: Some(DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         }),
         serial: serial.map(str::to_string),
         unit_id: [1, 2, 3, 4],
@@ -41,6 +42,7 @@ fn direct_and_routeless_enrichment_requires_matching_nonzero_units() {
         Some(DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         }),
         None,
     ] {

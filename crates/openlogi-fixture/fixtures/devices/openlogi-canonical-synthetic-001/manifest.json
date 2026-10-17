@@ -105,6 +105,13 @@
                 "field": "device_unit_id"
               },
               "count": 1
+            },
+            {
+              "location": {
+                "asset": "profile",
+                "field": "direct_route_identity"
+              },
+              "count": 1
             }
           ]
         }
