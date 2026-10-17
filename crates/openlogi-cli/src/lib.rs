@@ -205,7 +205,6 @@ mod tests {
             ("smartshift-status", FixtureOperation::SmartshiftStatus),
             ("wheel-mode", FixtureOperation::WheelMode),
             ("backlight-state", FixtureOperation::BacklightState),
-            ("brightness-state", FixtureOperation::BrightnessState),
         ];
 
         for (name, expected) in operations {

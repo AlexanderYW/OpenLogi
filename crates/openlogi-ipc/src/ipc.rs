@@ -17,9 +17,9 @@ use openlogi_core::binding::{ActionRingIcon, ActionRingSlot};
 use openlogi_core::config::Lighting;
 use openlogi_core::device::{ChangedOnLight, DeviceInventory, LightState, StandaloneDevice};
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
-    FnLockState, LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate,
-    ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
+    LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo,
+    ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
@@ -106,11 +106,8 @@ pub use succession::Identity;
 ///      the main wheel as a virtual thumb wheel; `AgentSnapshot::lights`
 ///      appended — what each standalone light reached over HID++ `0x1990`
 ///      reads back, and the settings changed on the light itself;
-///      `Capabilities::brightness`,
-///      `Agent::{read_brightness, set_brightness}` and
-///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
-///      `0x8040` device brightness; `HidppOperation::WriteKeyImage` appended —
-///      an image written to one of the MX Creative Keypad's LCD keys;
+///      `HidppOperation::WriteKeyImage` appended — an image written to one
+///      of the MX Creative Keypad's LCD keys;
 ///      `Action::{PreviousKeypadPage, NextKeypadPage}` appended and `ButtonId`
 ///      grid keys gain page-qualified names (`page2:gridMiddle`) — the
 ///      keypad's binding pages.
@@ -685,12 +682,4 @@ pub trait Agent {
         slot: u8,
         name: String,
     ) -> Result<EasySwitchHosts, WriteError>;
-
-    /// Read `route`'s current brightness with the range the device
-    /// advertised — the read-only counterpart of [`Self::set_brightness`].
-    async fn read_brightness(route: DeviceRoute) -> Result<BrightnessState, WriteError>;
-    /// Set the brightness on `route` now and answer with the state the device
-    /// echoes back, so the GUI reflects what the firmware actually accepted
-    /// rather than what was requested.
-    async fn set_brightness(route: DeviceRoute, level: u16) -> Result<BrightnessState, WriteError>;
 }

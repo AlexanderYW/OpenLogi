@@ -270,12 +270,6 @@ pub enum HidppOperation {
     /// Write an Easy-Switch slot's `0x1815` host name. Appended last —
     /// variant order is wire format.
     RenameHost,
-    /// Read the `0x8040` brightness level and range. Appended last — variant
-    /// order is wire format.
-    ReadBrightness,
-    /// Write the `0x8040` brightness level. Appended last — variant order is
-    /// wire format.
-    WriteBrightness,
     /// Write an image to a keypad's LCD key over the vendor image report.
     /// Appended last — variant order is wire format.
     WriteKeyImage,

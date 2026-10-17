@@ -32,8 +32,7 @@ pub(crate) use events::{StateEvent, StateEvents};
 pub use light::LightCommandStatus;
 pub(crate) use load::Load;
 pub use load::{
-    BacklightLoad, BrightnessLoad, DpiLoad, EasySwitchLoad, FnLockLoad, ReportRateLoad,
-    SmartShiftLoad,
+    BacklightLoad, DpiLoad, EasySwitchLoad, FnLockLoad, ReportRateLoad, SmartShiftLoad,
 };
 
 /// Result of confirming a SmartShift write by reading the value back.
@@ -68,7 +67,6 @@ mod action_ring;
 mod agent;
 mod backlight;
 mod bindings;
-mod brightness;
 mod camera;
 mod config;
 mod device_key;
@@ -231,7 +229,6 @@ impl AppState {
             state.load_current_report_rate(cx);
             state.load_current_backlight(cx);
             state.load_current_easy_switch(cx);
-            state.load_current_brightness(cx);
         });
     }
 

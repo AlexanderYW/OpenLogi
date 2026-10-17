@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use openlogi_core::hid::{
-    BacklightState, BrightnessState, DpiInfo, EasySwitchHosts, FnLockState, ReportRateInfo,
-    SmartShiftStatus,
+    BacklightState, DpiInfo, EasySwitchHosts, FnLockState, ReportRateInfo, SmartShiftStatus,
 };
 
 /// State projected from an swr-backed device query: unqueried, in flight,
@@ -55,8 +54,3 @@ pub type BacklightLoad = Load<Arc<BacklightState>>;
 /// stores each slot's host name and OS itself — the computer on the slot
 /// writes them — so the read is the only record.
 pub type EasySwitchLoad = Load<Arc<EasySwitchHosts>>;
-
-/// Per-device brightness (`0x8040`) load state. See [`Load`]. Like SmartShift
-/// the value lives in the device, not `config.toml` — the GUI reads it, writes
-/// it, and shows whatever the device echoed back.
-pub type BrightnessLoad = Load<Arc<BrightnessState>>;

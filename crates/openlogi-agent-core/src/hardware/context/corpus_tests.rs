@@ -14,11 +14,7 @@ async fn contributed_corpus_reads_obey_agent_channel_and_suspend_boundaries() {
         for cassette in fixture.cassettes().iter().filter(|case| {
             matches!(
                 case.name.as_str(),
-                "dpi-info"
-                    | "smartshift-status"
-                    | "wheel-mode"
-                    | "backlight-state"
-                    | "brightness-state"
+                "dpi-info" | "smartshift-status" | "wheel-mode" | "backlight-state"
             )
         }) {
             let (backend, route) = ReplayBackend::from_profile(fixture.profile(), cassette)
@@ -57,7 +53,45 @@ async fn contributed_corpus_reads_obey_agent_channel_and_suspend_boundaries() {
             );
             assert!(signal.resume());
             let settings = &fixture.profile().settings[0];
-            check_recorded_setting(&shared, &route, &cassette.name, settings).await;
+            match cassette.name.as_str() {
+                "dpi-info" => check(
+                    &settings.dpi,
+                    shared
+                        .device(&route)
+                        .run(HidppOperation::ReadDpiCapabilities, |channel| async move {
+                            openlogi_hid::get_dpi_info_on(&channel).await
+                        })
+                        .await,
+                ),
+                "smartshift-status" => check(
+                    &settings.smartshift,
+                    shared
+                        .device(&route)
+                        .run(HidppOperation::ReadSmartShift, |channel| async move {
+                            openlogi_hid::get_smartshift_status_on(&channel).await
+                        })
+                        .await,
+                ),
+                "wheel-mode" => check(
+                    &settings.wheel,
+                    shared
+                        .device(&route)
+                        .run(HidppOperation::ReadWheelMode, |channel| async move {
+                            openlogi_hid::get_scroll_wheel_mode_on(&channel).await
+                        })
+                        .await,
+                ),
+                "backlight-state" => check(
+                    &settings.backlight,
+                    shared
+                        .device(&route)
+                        .run(HidppOperation::ReadBacklight, |channel| async move {
+                            openlogi_hid::get_backlight_on(&channel).await
+                        })
+                        .await,
+                ),
+                _ => unreachable!("filtered setting case"),
+            }
             backend.require_complete().unwrap_or_else(|error| {
                 panic!("{}/{}: {error}", fixture.manifest().id, cassette.name)
             });
@@ -69,64 +103,6 @@ async fn contributed_corpus_reads_obey_agent_channel_and_suspend_boundaries() {
                 1
             );
         }
-    }
-}
-
-/// Read `case`'s setting through the agent's device gate on `route` and check
-/// it against the recorded profile `settings`.
-async fn check_recorded_setting(
-    shared: &crate::orchestrator::SharedHandles,
-    route: &openlogi_hid::DeviceRoute,
-    case: &str,
-    settings: &openlogi_fixture::ProfileDeviceSettings,
-) {
-    match case {
-        "dpi-info" => check(
-            &settings.dpi,
-            shared
-                .device(route)
-                .run(HidppOperation::ReadDpiCapabilities, |channel| async move {
-                    openlogi_hid::get_dpi_info_on(&channel).await
-                })
-                .await,
-        ),
-        "smartshift-status" => check(
-            &settings.smartshift,
-            shared
-                .device(route)
-                .run(HidppOperation::ReadSmartShift, |channel| async move {
-                    openlogi_hid::get_smartshift_status_on(&channel).await
-                })
-                .await,
-        ),
-        "wheel-mode" => check(
-            &settings.wheel,
-            shared
-                .device(route)
-                .run(HidppOperation::ReadWheelMode, |channel| async move {
-                    openlogi_hid::get_scroll_wheel_mode_on(&channel).await
-                })
-                .await,
-        ),
-        "backlight-state" => check(
-            &settings.backlight,
-            shared
-                .device(route)
-                .run(HidppOperation::ReadBacklight, |channel| async move {
-                    openlogi_hid::get_backlight_on(&channel).await
-                })
-                .await,
-        ),
-        "brightness-state" => check(
-            &settings.brightness,
-            shared
-                .device(route)
-                .run(HidppOperation::ReadBrightness, |channel| async move {
-                    openlogi_hid::get_brightness_on(&channel).await
-                })
-                .await,
-        ),
-        _ => unreachable!("filtered setting case"),
     }
 }
 

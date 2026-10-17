@@ -176,11 +176,6 @@ pub struct Capabilities {
     /// persisted identity.
     #[serde(default)]
     pub virtual_thumbwheel: bool,
-    /// Display brightness can be read and written — HID++ `0x8040`
-    /// BrightnessControl, which the MX Creative Keypad reports for its LCD
-    /// keys. Appended: crosses the IPC and the persisted identity.
-    #[serde(default)]
-    pub brightness: bool,
 }
 
 impl Capabilities {
@@ -215,7 +210,6 @@ impl Capabilities {
             // Set by the `0x1b04` control walk; the feature table alone
             // cannot say which controls report raw wheel.
             virtual_thumbwheel: false,
-            brightness: ids.contains(&0x8040),
         }
     }
 
@@ -613,7 +607,6 @@ mod tests {
                     backlight: false,
                     easy_switch: false,
                     virtual_thumbwheel: false,
-                    brightness: false,
                 }),
                 settings_revision: 0,
             }],
@@ -732,7 +725,6 @@ mod tests {
                 backlight: false,
                 easy_switch: false,
                 virtual_thumbwheel: false,
-                brightness: false,
             }
         );
         assert!(!Capabilities::from_feature_ids(&[0x0003, 0x1b04]).thumbwheel);
@@ -756,7 +748,6 @@ mod tests {
                 backlight: false,
                 easy_switch: false,
                 virtual_thumbwheel: false,
-                brightness: false,
             }
         );
         // No driving features → nothing offered.
@@ -796,9 +787,6 @@ mod tests {
         assert!(Capabilities::from_feature_ids(&[0x0001, 0x40a2]).fn_lock);
         assert!(Capabilities::from_feature_ids(&[0x0001, 0x40a0]).fn_lock);
         assert!(!Capabilities::from_feature_ids(&[0x0001, 0x1982]).fn_lock);
-        // BrightnessControl (0x8040) earns the brightness bit; nothing else does.
-        assert!(Capabilities::from_feature_ids(&[0x0001, 0x8040]).brightness);
-        assert!(!Capabilities::from_feature_ids(&[0x0001, 0x1982]).brightness);
     }
 
     #[test]

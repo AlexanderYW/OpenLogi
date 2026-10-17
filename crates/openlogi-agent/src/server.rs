@@ -18,9 +18,9 @@ use openlogi_core::binding::ActionRingSlot;
 use openlogi_core::config::{Config, Lighting};
 use openlogi_core::device::DeviceInventory;
 use openlogi_hid::{
-    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
-    FnLockState, HapticWaveform, HidppOperation, LightCommand, ReceiverSelector, ReportRate,
-    ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
+    HapticWaveform, HidppOperation, LightCommand, ReceiverSelector, ReportRate, ReportRateInfo,
+    ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use openlogi_ipc::transport;
 use openlogi_ipc::{
@@ -245,33 +245,6 @@ impl Agent for AgentServer {
         fn_lock: bool,
     ) -> Result<FnLockState, WriteError> {
         self.shared.set_fn_lock(&route, fn_lock).await
-    }
-
-    async fn read_brightness(
-        self,
-        _: Context,
-        route: DeviceRoute,
-    ) -> Result<BrightnessState, WriteError> {
-        self.shared
-            .device(&route)
-            .run(HidppOperation::ReadBrightness, |c| async move {
-                openlogi_hid::get_brightness_on(&c).await
-            })
-            .await
-    }
-
-    async fn set_brightness(
-        self,
-        _: Context,
-        route: DeviceRoute,
-        level: u16,
-    ) -> Result<BrightnessState, WriteError> {
-        self.shared
-            .device(&route)
-            .run(HidppOperation::WriteBrightness, |c| async move {
-                openlogi_hid::set_brightness_on(&c, level).await
-            })
-            .await
     }
 
     async fn request_accessibility_prompt(self, _: Context) {

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Args;
 use openlogi_core::device::{DeviceInventory, PairedDevice, StandaloneDevice};
-use openlogi_core::hid::{BrightnessState, DeviceRoute, WriteError};
+use openlogi_core::hid::{DeviceRoute, WriteError};
 use openlogi_fixture::{
     DeviceProfile, FIXTURE_SCHEMA_VERSION, ProfileDeviceSettings, ProfileSetting, ProfileSupport,
 };
@@ -358,9 +358,6 @@ async fn capture_hidpp_settings(
         sanitize::easy_switch_hosts(hosts);
     }
 
-    let brightness =
-        capture_brightness(client, source_route, device, capabilities.brightness).await?;
-
     Ok(ProfileDeviceSettings {
         route: profile_route,
         dpi,
@@ -370,30 +367,9 @@ async fn capture_hidpp_settings(
         fn_lock,
         report_rate,
         easy_switch,
-        brightness,
         lighting: profile_support(capabilities.lighting),
         light: ProfileSupport::Unsupported,
     })
-}
-
-/// The `0x8040` brightness of `device`: settled from its capability facts
-/// when they decide it, else read from the online device.
-async fn capture_brightness(
-    client: &AgentClient,
-    source_route: &DeviceRoute,
-    device: &PairedDevice,
-    supported: bool,
-) -> Result<ProfileSetting<BrightnessState>> {
-    match capability_setting(device.online, supported) {
-        Some(setting) => Ok(setting),
-        None => {
-            semantic_read(
-                "brightness",
-                agent::call(client.read_brightness(context::current(), source_route.clone())),
-            )
-            .await
-        }
-    }
 }
 
 fn capability_setting<T>(online: bool, supported: bool) -> Option<ProfileSetting<T>> {
@@ -451,7 +427,6 @@ fn capture_standalone(source: &StandaloneDevice) -> Result<ProfileCaptureParts> 
         fn_lock: ProfileSetting::Unsupported,
         report_rate: ProfileSetting::Unsupported,
         easy_switch: ProfileSetting::Unsupported,
-        brightness: ProfileSetting::Unsupported,
         lighting: ProfileSupport::Unsupported,
         light: profile_support(light_supported),
     };
