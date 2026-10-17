@@ -138,12 +138,27 @@ impl FunctionRowView {
     pub(crate) fn select_key(&mut self, idx: Option<usize>, cx: &mut Context<Self>) {
         // Changing selection also drops any open editor + its drafts.
         if self.selected_key != idx {
-            self.active_editor = None;
-            self.text_state = None;
-            self.workflow_draft.clear();
+            self.drop_editor();
         }
         self.selected_key = idx;
         cx.notify();
+    }
+
+    /// Close the open editor and discard its drafts. Every change of the key
+    /// being edited — another key, another page — calls this, or a draft
+    /// started for one key would save onto the next.
+    fn drop_editor(&mut self) {
+        self.active_editor = None;
+        self.text_state = None;
+        self.workflow_draft.clear();
+    }
+
+    /// Edit the grid keys on `page`, dropping any open editor when it moves.
+    fn move_keypad_page(&mut self, page: KeypadPage) {
+        if self.keypad_page != page {
+            self.keypad_page = page;
+            self.drop_editor();
+        }
     }
 
     /// Toggle a key selection from a click on either its callout or key hit
@@ -173,10 +188,10 @@ impl FunctionRowView {
             .map(DeviceRecord::device_key);
         if self.keypad_device != record_key {
             self.keypad_device = record_key;
-            self.keypad_page = KeypadPage::FIRST;
+            self.move_keypad_page(KeypadPage::FIRST);
         }
         let last = state.map_or(KeypadPage::FIRST, AppState::current_keypad_pages);
-        self.keypad_page = self.keypad_page.min(last);
+        self.move_keypad_page(self.keypad_page.min(last));
         // Every profile's keys, not just the open one's: removal drops them all.
         let binds_keys = state.is_some_and(|state| state.current_keypad_page_binds(last));
         LastPage {
@@ -188,7 +203,7 @@ impl FunctionRowView {
     /// Edit the grid keys on `page`.
     pub(crate) fn set_keypad_page(&mut self, page: KeypadPage, cx: &mut Context<Self>) {
         if self.keypad_page != page {
-            self.keypad_page = page;
+            self.move_keypad_page(page);
             cx.notify();
         }
     }
@@ -201,9 +216,7 @@ impl FunctionRowView {
     }
 
     pub(crate) fn close_editor(&mut self, cx: &mut Context<Self>) {
-        self.active_editor = None;
-        self.text_state = None;
-        self.workflow_draft.clear();
+        self.drop_editor();
         cx.notify();
     }
 
@@ -289,9 +302,7 @@ impl Render for FunctionRowView {
         // drop it instead of indexing past the new slot list.
         if self.selected_key.is_some_and(|idx| idx >= slots.len()) {
             self.selected_key = None;
-            self.active_editor = None;
-            self.text_state = None;
-            self.workflow_draft.clear();
+            self.drop_editor();
         }
         let selected = self.selected_key;
         let hovered = self.hovered_key;

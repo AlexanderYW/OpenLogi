@@ -667,3 +667,56 @@ fn only_grid_targets_move_to_the_edited_page() {
             .all(|page| page == KeypadPage::FIRST)
     );
 }
+
+/// A key-row view whose workflow editor has a draft open on keypad page 2.
+fn view_with_a_draft_on_page_two(cx: &mut gpui::TestAppContext) -> Entity<FunctionRowView> {
+    use crate::services::assets::AssetResolver;
+    use crate::state::Sources;
+
+    cx.update(|cx| {
+        let (commands, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let resolver = AssetResolver::new();
+        let state = cx.new(|_| {
+            AppState::new(Sources::in_memory(
+                openlogi_core::config::Config::ephemeral(),
+                &resolver,
+                commands,
+            ))
+        });
+        AppState::set_global(state, cx);
+        cx.new(|cx| {
+            let mut view = FunctionRowView::new(cx);
+            view.set_keypad_page(KeypadPage::new(2).unwrap(), cx);
+            view.select_key(Some(0), cx);
+            view.open_editor(PowerUserKind::Workflow, cx);
+            view.push_workflow_step(WorkflowStep::Delay { millis: 50 }, cx);
+            view
+        })
+    })
+}
+
+#[gpui::test]
+fn turning_the_page_drops_a_draft_for_the_old_page(cx: &mut gpui::TestAppContext) {
+    let view = view_with_a_draft_on_page_two(cx);
+    cx.update(|cx| {
+        view.update(cx, |view, cx| {
+            view.set_keypad_page(KeypadPage::FIRST, cx);
+            assert_eq!(view.active_editor, None);
+            assert!(view.workflow_draft().is_empty());
+        });
+    });
+}
+
+#[gpui::test]
+fn removing_the_edited_page_drops_its_draft(cx: &mut gpui::TestAppContext) {
+    let view = view_with_a_draft_on_page_two(cx);
+    cx.update(|cx| {
+        view.update(cx, |view, _| {
+            // No device has a second page, so the edited page clamps to 1.
+            view.sync_keypad_page(None);
+            assert_eq!(view.keypad_page, KeypadPage::FIRST);
+            assert_eq!(view.active_editor, None);
+            assert!(view.workflow_draft().is_empty());
+        });
+    });
+}
