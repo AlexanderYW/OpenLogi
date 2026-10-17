@@ -107,13 +107,9 @@ fn derive_replay_route(
         DeviceRoute::Direct {
             vendor_id,
             product_id,
-            ..
         } => Ok(DeviceRoute::Direct {
             vendor_id: *vendor_id,
             product_id: *product_id,
-            // Self-replay runs one cassette on one node, so nothing needs
-            // telling apart — and the live identity must not reach a fixture.
-            identity: None,
         }),
         DeviceRoute::RawHid { .. } => {
             bail!("raw HID routes are outside HID++ fixture case capture")
@@ -138,7 +134,6 @@ fn unique_replacement(audit: &HidCassetteAudit, kind: SanitizedIdentityKind) -> 
 
 #[cfg(test)]
 mod tests {
-    use openlogi_core::device_order::DeviceIdentity;
     use openlogi_core::hid::{
         SmartShiftAutoDisengage, SmartShiftMode, SmartShiftStatus, SmartShiftThreshold,
     };
@@ -212,7 +207,6 @@ mod tests {
         let direct = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
-            identity: None,
         };
         assert_eq!(
             derive_replay_route(&direct, &HidCassetteAudit::default())
@@ -524,7 +518,6 @@ mod tests {
                 DeviceRoute::Direct {
                     vendor_id: 0x046d,
                     product_id: 0xb037,
-                    identity: Some(DeviceIdentity::Serial("ol-ser-00001".into())),
                 },
                 0xb037,
             ),
@@ -539,7 +532,6 @@ mod tests {
                 DeviceRoute::Direct {
                     vendor_id: 0x046d,
                     product_id: 0xb034,
-                    identity: Some(DeviceIdentity::Serial("ol-ser-00001".into())),
                 },
                 0xb034,
             ),
@@ -573,7 +565,6 @@ mod tests {
             DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb35b,
-                identity: None,
             },
             0xb35b,
         );

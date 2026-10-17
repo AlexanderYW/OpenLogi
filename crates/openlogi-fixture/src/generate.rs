@@ -290,7 +290,6 @@ fn resolve_profile_route<'a>(
         DeviceRoute::Direct {
             vendor_id,
             product_id,
-            ..
         } => FixtureDeviceRoute::Direct {
             vendor_id: *vendor_id,
             product_id: *product_id,

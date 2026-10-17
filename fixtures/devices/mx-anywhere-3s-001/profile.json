@@ -66,10 +66,7 @@
       "route": {
         "Direct": {
           "vendor_id": 1133,
-          "product_id": 45111,
-          "identity": {
-            "Serial": "ol-ser-00001"
-          }
+          "product_id": 45111
         }
       },
       "dpi": {

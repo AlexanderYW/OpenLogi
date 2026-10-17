@@ -439,7 +439,6 @@ async fn wheel_and_backlight_reads_preserve_route_and_support_errors() {
     let unknown = DeviceRoute::Direct {
         vendor_id: 0xffff,
         product_id: 0xffff,
-        identity: None,
     };
     assert!(matches!(
         agent
@@ -616,7 +615,6 @@ async fn profile_backed_support_and_route_errors_remain_typed() {
             DeviceRoute::Direct {
                 vendor_id: 0xffff,
                 product_id: 0xffff,
-                identity: None,
             },
         )
         .await;
@@ -716,7 +714,6 @@ fn unpairing_drops_the_slot_from_the_rendered_inventory() {
     let direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
-        identity: None,
     };
     assert_eq!(state.unpair(&direct), Err(PairingFailure::ReceiverNotFound));
 }

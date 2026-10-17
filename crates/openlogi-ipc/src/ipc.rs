@@ -118,9 +118,7 @@ pub use succession::Identity;
 ///      an image written to one of the MX Creative Keypad's LCD keys;
 ///      `Action::{PreviousKeypadPage, NextKeypadPage}` appended and `ButtonId`
 ///      grid keys gain page-qualified names (`page2:gridMiddle`) — the
-///      keypad's binding pages; `DeviceRoute::Direct` gains an `identity`
-///      (`DeviceIdentity`, newly on the wire) — two identical wired devices
-///      are two routes.
+///      keypad's binding pages.
 pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Environment variable through which the agent hands a supervised helper the
