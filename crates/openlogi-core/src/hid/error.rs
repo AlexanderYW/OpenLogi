@@ -273,6 +273,12 @@ pub enum HidppOperation {
     /// Write an image to a keypad's LCD key over the vendor image report.
     /// Appended last — variant order is wire format.
     WriteKeyImage,
+    /// Read the `0x8040` brightness level and range. Appended last — variant
+    /// order is wire format.
+    ReadBrightness,
+    /// Write the `0x8040` brightness level. Appended last — variant order is
+    /// wire format.
+    WriteBrightness,
 }
 
 /// HID++ feature error kind in a serializable wire-safe form.

@@ -17,9 +17,9 @@ use openlogi_core::binding::{ActionRingIcon, ActionRingSlot};
 use openlogi_core::config::Lighting;
 use openlogi_core::device::{ChangedOnLight, DeviceInventory, LightState, StandaloneDevice};
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo,
-    ScrollWheelMode, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
+    FnLockState, LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate,
+    ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
@@ -110,7 +110,10 @@ pub use succession::Identity;
 ///      of the MX Creative Keypad's LCD keys;
 ///      `Action::{PreviousKeypadPage, NextKeypadPage}` appended and `ButtonId`
 ///      grid keys gain page-qualified names (`page2:gridMiddle`) — the
-///      keypad's binding pages.
+///      keypad's binding pages; `Capabilities::brightness`,
+///      `Agent::{read_brightness, set_brightness}` and
+///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
+///      `0x8040` device brightness.
 pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Environment variable through which the agent hands a supervised helper the
@@ -682,4 +685,12 @@ pub trait Agent {
         slot: u8,
         name: String,
     ) -> Result<EasySwitchHosts, WriteError>;
+
+    /// Read `route`'s current brightness with the range the device
+    /// advertised — the read-only counterpart of [`Self::set_brightness`].
+    async fn read_brightness(route: DeviceRoute) -> Result<BrightnessState, WriteError>;
+    /// Set the brightness on `route` now and answer with the state the device
+    /// echoes back, so the GUI reflects what the firmware actually accepted
+    /// rather than what was requested.
+    async fn set_brightness(route: DeviceRoute, level: u16) -> Result<BrightnessState, WriteError>;
 }

@@ -54,9 +54,9 @@ use openlogi_core::device::{
 use openlogi_core::single_instance::{self, InstanceError, Role};
 use openlogi_fixture::{DeviceProfile, FixtureError, ProfileDeviceSettings, ProfileSetting};
 use openlogi_hid::{
-    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
-    LightCommand, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo, ScrollWheelMode,
-    SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
+    FnLockState, LightCommand, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo,
+    ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use openlogi_ipc::transport;
 use openlogi_ipc::{
@@ -876,6 +876,32 @@ impl Agent for MockAgent {
         let stored = profile_value_mut(&mut settings.fn_lock, &route, 0x40a3)?;
         stored.fn_lock = fn_lock;
         info!(%route, fn_lock, "set_fn_lock");
+        Ok(*stored)
+    }
+
+    async fn read_brightness(
+        self,
+        _: Context,
+        route: DeviceRoute,
+    ) -> Result<BrightnessState, WriteError> {
+        let state = self.state.lock().await;
+        profile_value(&state.settings_for(&route)?.brightness, &route, 0x8040).cloned()
+    }
+
+    async fn set_brightness(
+        self,
+        _: Context,
+        route: DeviceRoute,
+        level: u16,
+    ) -> Result<BrightnessState, WriteError> {
+        let mut state = self.state.lock().await;
+        let settings = state.settings_for_mut(&route)?;
+        let stored = profile_value_mut(&mut settings.brightness, &route, 0x8040)?;
+        // The scripted device takes what the real device layer would write —
+        // the writable range, never 0 — and echoes the applied value, never
+        // the requested one.
+        stored.level = stored.writable().clamp(level);
+        info!(%route, level = stored.level, "set_brightness");
         Ok(*stored)
     }
 
