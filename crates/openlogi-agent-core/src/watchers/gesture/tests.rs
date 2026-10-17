@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use super::*;
-use crate::receiver_access::ReceiverAccess;
 use crate::watchers::retry::wait_for_deadline;
 use openlogi_core::binding::{Action, Binding, ButtonId, GestureDirection};
 use openlogi_core::config::{ThumbwheelSensitivity, VerticalScrollSensitivity};
@@ -761,7 +760,7 @@ async fn pending_restore_follows_a_disabled_devices_latest_route() {
     };
 
     let mut stuck = recovering(stale.clone());
-    retry_pending_restores(&mut stuck, &registry, Instant::now(), restore_routes(None)).await;
+    retry_pending_restores(&mut stuck, &registry, None, Instant::now()).await;
     assert_eq!(
         route_of(&stuck),
         Some(stale.clone()),
@@ -771,13 +770,7 @@ async fn pending_restore_follows_a_disabled_devices_latest_route() {
     let mut followed = recovering(stale);
     let publication =
         CapturePublication::new(Vec::new(), BTreeMap::from([(key.clone(), latest.clone())]));
-    retry_pending_restores(
-        &mut followed,
-        &registry,
-        Instant::now(),
-        restore_routes(Some(&publication)),
-    )
-    .await;
+    retry_pending_restores(&mut followed, &registry, Some(&publication), Instant::now()).await;
     assert!(
         publication.plans().is_empty(),
         "capture stays disarmed while the device is disabled"
