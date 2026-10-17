@@ -109,17 +109,6 @@ pub(super) fn configured_report_rate(config: &Config, dev: &AgentDevice) -> Opti
         .flatten()
 }
 
-/// The persisted BrightnessControl level to re-apply to one device, or `None`
-/// when it reports no BrightnessControl or the user never chose a level.
-/// Whether the device actually forgets its level is the device's own answer,
-/// read at write time by [`openlogi_hid::restore_brightness_on`].
-pub(super) fn configured_brightness(config: &Config, dev: &AgentDevice) -> Option<u16> {
-    dev.capabilities
-        .is_some_and(|capabilities| capabilities.brightness)
-        .then(|| config.brightness(&dev.config_key))
-        .flatten()
-}
-
 /// Build the agent device list from an inventory snapshot. Mirrors the GUI's
 /// `build_device_list` minus the asset/display fields: a device is included
 /// only once its HID++ DeviceInformation (`model_info`) has resolved, since the

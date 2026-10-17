@@ -53,8 +53,6 @@ pub(crate) enum StateEvent {
     BacklightChanged(DeviceKey),
     /// The device's Easy-Switch host read landed or changed.
     EasySwitchChanged(DeviceKey),
-    /// The device's brightness read landed, changed, or came back from a write.
-    BrightnessChanged(DeviceKey),
     /// Device or standalone-light settings changed.
     LightingChanged(DeviceKey),
     /// Camera settings or activity changed.
@@ -90,7 +88,6 @@ impl StateEvent {
             | Self::ReportRateChanged(key)
             | Self::BacklightChanged(key)
             | Self::EasySwitchChanged(key)
-            | Self::BrightnessChanged(key)
             | Self::LightingChanged(key)
             | Self::DeviceConfigChanged(key) => Some(key),
             Self::AgentChanged
@@ -238,7 +235,6 @@ impl AppState {
             | StateEvent::ReportRateChanged(_)
             | StateEvent::BacklightChanged(_)
             | StateEvent::EasySwitchChanged(_)
-            | StateEvent::BrightnessChanged(_)
             | StateEvent::LightingChanged(_)
             | StateEvent::CameraChanged
             | StateEvent::CameraPermissionChanged

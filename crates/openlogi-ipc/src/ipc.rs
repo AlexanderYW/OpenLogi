@@ -17,9 +17,9 @@ use openlogi_core::binding::{ActionRingIcon, ActionRingSlot};
 use openlogi_core::config::{ConfigRevision, Lighting};
 use openlogi_core::device::{ChangedOnLight, DeviceInventory, LightState, StandaloneDevice};
 use openlogi_core::hid::{
-    BacklightChange, BacklightState, BrightnessState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts,
-    FnLockState, LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate,
-    ReportRateInfo, ScrollWheelMode, SmartShiftStatus, WriteError,
+    BacklightChange, BacklightState, DeviceRoute, Dpi, DpiInfo, EasySwitchHosts, FnLockState,
+    LightCommand, PairingError, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo,
+    ScrollWheelMode, SmartShiftStatus, WriteError,
 };
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
@@ -111,11 +111,8 @@ pub use succession::Identity;
 ///      change made on a light unless the save holds its value, removes the
 ///      control's value, or the user chose that control. A file at another
 ///      revision loads as a plain reload.
-///      `Capabilities::brightness`,
-///      `Agent::{read_brightness, set_brightness}` and
-///      `HidppOperation::{ReadBrightness, WriteBrightness}` appended — the
-///      `0x8040` device brightness; `HidppOperation::WriteKeyImage` appended —
-///      an image written to one of the MX Creative Keypad's LCD keys;
+///      `HidppOperation::WriteKeyImage` appended — an image written to one
+///      of the MX Creative Keypad's LCD keys;
 ///      `Action::{PreviousKeypadPage, NextKeypadPage}` appended and `ButtonId`
 ///      grid keys gain page-qualified names (`page2:gridMiddle`) — the
 ///      keypad's binding pages.
@@ -729,12 +726,4 @@ pub trait Agent {
     /// revision than `saved.revision` was edited since, and loads as
     /// [`Agent::reload_config`] loads it.
     async fn reload_saved_config(saved: SavedConfig) -> Result<(), ConfigReloadError>;
-
-    /// Read `route`'s current brightness with the range the device
-    /// advertised — the read-only counterpart of [`Self::set_brightness`].
-    async fn read_brightness(route: DeviceRoute) -> Result<BrightnessState, WriteError>;
-    /// Set the brightness on `route` now and answer with the state the device
-    /// echoes back, so the GUI reflects what the firmware actually accepted
-    /// rather than what was requested.
-    async fn set_brightness(route: DeviceRoute, level: u16) -> Result<BrightnessState, WriteError>;
 }

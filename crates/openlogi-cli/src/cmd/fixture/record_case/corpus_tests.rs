@@ -96,9 +96,6 @@ async fn contributed_corpus_replays_every_declared_operation() {
                 SemanticObservation::BacklightState(result) => {
                     assert_setting(&settings.backlight, result, specimen, case);
                 }
-                SemanticObservation::BrightnessState(result) => {
-                    assert_setting(&settings.brightness, result, specimen, case);
-                }
                 SemanticObservation::FirmwareEntities(_) => {
                     panic!("{specimen}/{case}: firmware needs independently reviewed expectations")
                 }

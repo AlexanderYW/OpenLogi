@@ -325,11 +325,6 @@ impl Runtime {
                     });
                 });
             }
-            ipc::GuiUpdate::BrightnessWritten { key, result } => {
-                cx.update(|cx| {
-                    AppState::apply(cx, |state| state.apply_brightness_written(&key, result));
-                });
-            }
             ipc::GuiUpdate::DeviceUnpaired {
                 record_key,
                 route,
