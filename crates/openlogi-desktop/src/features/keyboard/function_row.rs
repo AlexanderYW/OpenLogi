@@ -111,10 +111,19 @@ pub struct FunctionRowView {
     /// The keypad binding page the grid keys are being edited on — this
     /// editor's own choice, independent of the page the keypad is showing.
     keypad_page: KeypadPage,
-    /// The device [`Self::keypad_page`] was chosen on; another device starts
-    /// back on page 1.
-    keypad_device: Option<DeviceKey>,
+    /// The device and app profile being edited: another device starts back
+    /// on page 1, and either change drops the open editor.
+    edit_scope: EditScope,
     _state_obs: Subscription,
+}
+
+/// Which device's bindings, in which app profile, the view edits — beside
+/// the key and the page, what a draft was started for.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EditScope {
+    device: Option<DeviceKey>,
+    /// The open app profile, `None` for the device's global one.
+    profile: Option<String>,
 }
 
 impl FunctionRowView {
@@ -129,7 +138,7 @@ impl FunctionRowView {
             text_state: None,
             workflow_draft: Vec::new(),
             keypad_page: KeypadPage::FIRST,
-            keypad_device: None,
+            edit_scope: EditScope::default(),
             _state_obs: state_obs,
         }
     }
@@ -145,8 +154,8 @@ impl FunctionRowView {
     }
 
     /// Close the open editor and discard its drafts. Every change of the key
-    /// being edited — another key, another page — calls this, or a draft
-    /// started for one key would save onto the next.
+    /// being edited — another key, page, device, or app profile — calls
+    /// this, or a draft started for one would save onto the next.
     fn drop_editor(&mut self) {
         self.active_editor = None;
         self.text_state = None;
@@ -179,16 +188,24 @@ impl FunctionRowView {
         }
     }
 
-    /// Keep the edited page on the selected device's pages — page 1 on a new
-    /// device, clamped when pages were removed — and answer the device's last
-    /// page and whether removing it would drop bindings (so removal asks).
-    fn sync_keypad_page(&mut self, state: Option<&AppState>) -> LastPage {
-        let record_key = state
-            .and_then(AppState::current_record)
-            .map(DeviceRecord::device_key);
-        if self.keypad_device != record_key {
-            self.keypad_device = record_key;
-            self.move_keypad_page(KeypadPage::FIRST);
+    /// Follow the selected device and the open app profile — dropping a
+    /// draft started for another, and starting a new device on page 1 — keep
+    /// the edited page on the device's pages (clamped when pages were
+    /// removed), and answer the device's last page and whether removing it
+    /// would drop bindings (so removal asks).
+    fn sync_edit_scope(&mut self, state: Option<&AppState>) -> LastPage {
+        let scope = EditScope {
+            device: state
+                .and_then(AppState::current_record)
+                .map(DeviceRecord::device_key),
+            profile: state.and_then(AppState::editing_app).map(str::to_owned),
+        };
+        if self.edit_scope != scope {
+            if self.edit_scope.device != scope.device {
+                self.move_keypad_page(KeypadPage::FIRST);
+            }
+            self.drop_editor();
+            self.edit_scope = scope;
         }
         let last = state.map_or(KeypadPage::FIRST, AppState::current_keypad_pages);
         self.move_keypad_page(self.keypad_page.min(last));
@@ -294,7 +311,7 @@ impl Render for FunctionRowView {
         } else {
             keyboard_render_size(asset, viewport_h)
         };
-        let last_page = self.sync_keypad_page(state);
+        let last_page = self.sync_edit_scope(state);
         let pal = theme::palette(cx);
         let slots = key_slots_from_layouts(surface, state, self.keypad_page);
 

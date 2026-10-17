@@ -713,10 +713,37 @@ fn removing_the_edited_page_drops_its_draft(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
         view.update(cx, |view, _| {
             // No device has a second page, so the edited page clamps to 1.
-            view.sync_keypad_page(None);
+            view.sync_edit_scope(None);
             assert_eq!(view.keypad_page, KeypadPage::FIRST);
             assert_eq!(view.active_editor, None);
             assert!(view.workflow_draft().is_empty());
+        });
+    });
+}
+
+#[gpui::test]
+fn switching_the_app_profile_drops_a_draft_for_the_old_one(cx: &mut gpui::TestAppContext) {
+    let (state, _commands) = crate::state::tests::keypad_pages::keypad_state();
+    cx.update(|cx| {
+        let state = cx.new(|_| state);
+        AppState::set_global(state, cx);
+        let view = cx.new(FunctionRowView::new);
+        view.update(cx, |view, cx| {
+            view.sync_edit_scope(AppState::try_read(cx));
+            view.select_key(Some(0), cx);
+            view.open_editor(PowerUserKind::Workflow, cx);
+            view.push_workflow_step(WorkflowStep::Delay { millis: 50 }, cx);
+        });
+
+        AppState::global(cx).update(cx, |state, _| {
+            let _ = state.set_editing_app(Some("com.apple.Safari".into()));
+        });
+        view.update(cx, |view, cx| {
+            view.sync_edit_scope(AppState::try_read(cx));
+            assert_eq!(view.active_editor, None);
+            assert!(view.workflow_draft().is_empty());
+            // The key stays selected: only the draft belonged to the profile.
+            assert_eq!(view.selected_key, Some(0));
         });
     });
 }

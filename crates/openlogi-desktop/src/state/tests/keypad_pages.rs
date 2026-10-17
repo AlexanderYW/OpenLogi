@@ -6,7 +6,7 @@ use super::*;
 use crate::services::ipc::Command;
 use openlogi_core::binding::{Cid, GridKey, GridSlot, KeypadPage};
 
-fn keypad_state() -> (AppState, tokio::sync::mpsc::UnboundedReceiver<Command>) {
+pub(crate) fn keypad_state() -> (AppState, tokio::sync::mpsc::UnboundedReceiver<Command>) {
     let inventory = DeviceInventory {
         receiver: ReceiverInfo {
             name: "MX Creative Keypad".to_string(),
