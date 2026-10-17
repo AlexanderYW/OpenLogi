@@ -82,6 +82,25 @@ fn next_delay(backoff: &mut ExponentialBackoff) -> Duration {
     backoff.next().unwrap_or(MAX_RETRY_DELAY)
 }
 
+/// The keys of `spec` not known, from `panels`, to be showing their face.
+fn unpainted<'a>(
+    panels: &[PaintedPanel],
+    spec: &'a KeyDisplaySpec,
+) -> impl Iterator<Item = Paint<'a>> {
+    let painted = panels
+        .iter()
+        .find(|panel| panel.route == spec.route)
+        .map(|panel| &panel.faces);
+    spec.faces
+        .iter()
+        .filter(move |(key, face)| painted.and_then(|faces| faces.get(key)) != Some(face))
+        .map(move |(key, face)| Paint {
+            spec,
+            key: *key,
+            face: *face,
+        })
+}
+
 /// A keypad whose image writes keep failing, and when to try it again.
 #[derive(Debug)]
 struct FailingPanel {
@@ -112,17 +131,23 @@ impl Painted {
     ///
     /// Leaves out every key of a failing panel whose retry deadline is after
     /// `now`, and forgets the failures of a panel that left `specs` or whose
-    /// generation moved: either is a new device as far as retries go.
+    /// generation moved: either is a new device as far as retries go. Also
+    /// forgets those of a panel with nothing left to paint (a rebind that
+    /// failed was undone), whose retry deadline would otherwise lapse with
+    /// no write to move it and wake the watcher in a busy loop.
     fn plan<'a>(&mut self, specs: &'a [KeyDisplaySpec], now: Instant) -> Vec<Paint<'a>> {
         self.panels.retain(|panel| {
             specs
                 .iter()
                 .any(|spec| spec.route == panel.route && spec.generation == panel.generation)
         });
+        let panels = &self.panels;
         self.failing.retain(|failing| {
-            specs
-                .iter()
-                .any(|spec| spec.route == failing.route && spec.generation == failing.generation)
+            specs.iter().any(|spec| {
+                spec.route == failing.route
+                    && spec.generation == failing.generation
+                    && unpainted(panels, spec).next().is_some()
+            })
         });
         specs
             .iter()
@@ -132,23 +157,7 @@ impl Painted {
                     .iter()
                     .any(|failing| failing.route == spec.route && failing.retry_at > now)
             })
-            .flat_map(|spec| {
-                let painted = self
-                    .panels
-                    .iter()
-                    .find(|panel| panel.route == spec.route)
-                    .map(|panel| &panel.faces);
-                spec.faces
-                    .iter()
-                    .filter(move |(key, face)| {
-                        painted.and_then(|faces| faces.get(key)) != Some(face)
-                    })
-                    .map(move |(key, face)| Paint {
-                        spec,
-                        key: *key,
-                        face: *face,
-                    })
-            })
+            .flat_map(|spec| unpainted(panels, spec))
             .collect()
     }
 
