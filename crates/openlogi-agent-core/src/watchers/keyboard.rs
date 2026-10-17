@@ -24,15 +24,12 @@ use openlogi_hid::{
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
-use super::capture_manager::{
-    self, CaptureManager, ManagedSlot, ManagerInputs, PendingRestore, acquire_session_lease,
-    expedite_pending_restores, has_pending_restores, next_deadline, retry_pending_restores,
-};
-use super::capture_session::{CaptureRecovery, CaptureSession, ReconcileAction};
+use super::capture_manager::{self, CaptureManager, ManagerInputs, PendingRestore};
+use super::capture_session::{CaptureRecovery, CaptureSession, CaptureSlot, ReconcileAction};
 use super::retry::RETRY_DELAY;
 use super::shutdown::{ManagerCompletion, WatcherHandle};
 use crate::hardware::DeviceAccess;
-use crate::receiver_access::{ReceiverRequestState, SessionReceiverLease};
+use crate::receiver_access::{ReceiverAccess, ReceiverRequestState, SessionReceiverLease};
 use crate::runtime::{ActionDispatcher, HidppSessionId};
 
 /// Everything the watcher needs to capture one keyboard: where it is, which
@@ -94,7 +91,8 @@ struct KeyboardDispatchPlan {
 }
 type RunningKeyboardSession =
     CaptureSession<KeyboardTarget, KeyboardDispatchPlan, CaptureSessionStop>;
-type KeyboardSlot = ManagedSlot<KeyboardTarget, KeyboardDispatchPlan>;
+type KeyboardSlot =
+    CaptureSlot<KeyboardTarget, KeyboardDispatchPlan, PendingRestore, CaptureSessionStop>;
 
 struct KeyboardInput {
     route: DeviceRoute,
@@ -253,6 +251,72 @@ fn reconcile_published_session(
     reconcile_session(running, wanted_for(&wanted, route), dispatcher);
 }
 
+/// The shared receiver lease every keyboard session holds, acquiring it when
+/// none is alive.
+fn acquire_session_lease(
+    receiver_access: &ReceiverAccess,
+    lease: &mut Weak<SessionReceiverLease>,
+) -> Option<Arc<SessionReceiverLease>> {
+    if let Some(existing) = lease.upgrade() {
+        return Some(existing);
+    }
+    let fresh = Arc::new(receiver_access.try_acquire_for_session()?);
+    *lease = Arc::downgrade(&fresh);
+    Some(fresh)
+}
+
+/// Retry every restore owed and due by `now`, each on its own route.
+async fn retry_pending_restores(
+    slots: &mut HashMap<DeviceRoute, KeyboardSlot>,
+    registry: &openlogi_hid::ChannelRegistry,
+    now: tokio::time::Instant,
+) {
+    let due: Vec<_> = slots
+        .iter()
+        .filter(|(_, slot)| {
+            slot.recovery()
+                .and_then(|recovery| recovery.pending_restore.as_ref())
+                .is_some_and(|pending| pending.retry_at <= now)
+        })
+        .map(|(route, _)| route.clone())
+        .collect();
+    for route in due {
+        let Some(KeyboardSlot::Recovering(mut recovery)) = slots.remove(&route) else {
+            continue;
+        };
+        let Some(pending) = recovery.pending_restore.take() else {
+            slots.insert(route, KeyboardSlot::Recovering(recovery));
+            continue;
+        };
+        if let CaptureSessionOutcome::RestorePending(token) = pending.token.retry(registry).await {
+            recovery.pending_restore = Some(PendingRestore {
+                token,
+                retry_at: tokio::time::Instant::now() + RETRY_DELAY,
+            });
+        }
+        if !recovery.is_empty() {
+            slots.insert(route, KeyboardSlot::Recovering(recovery));
+        }
+    }
+}
+
+/// The earliest instant recovery work in `slots` can make progress, or
+/// `None` while an exclusive request or suspended device I/O parks it.
+fn next_deadline(
+    requests: ReceiverRequestState,
+    device_io_allowed: bool,
+    slots: &HashMap<DeviceRoute, KeyboardSlot>,
+) -> Option<tokio::time::Instant> {
+    if requests.any() || !device_io_allowed {
+        return None;
+    }
+    slots
+        .values()
+        .filter_map(KeyboardSlot::recovery)
+        .filter_map(|recovery| recovery.next_deadline(|pending| pending.retry_at))
+        .min()
+}
+
 impl KeyboardManagerState {
     fn new(dispatcher: ActionDispatcher) -> Self {
         Self {
@@ -271,11 +335,22 @@ impl KeyboardManagerState {
     }
 
     fn expedite_pending_restores(&mut self) {
-        expedite_pending_restores(&mut self.slots);
+        let now = tokio::time::Instant::now();
+        for slot in self.slots.values_mut() {
+            if let Some(pending) = slot
+                .recovery_mut()
+                .and_then(|recovery| recovery.pending_restore.as_mut())
+            {
+                pending.retry_at = now;
+            }
+        }
     }
 
     fn has_pending_restores(&self) -> bool {
-        has_pending_restores(&self.slots)
+        self.slots.values().any(|slot| {
+            slot.recovery()
+                .is_some_and(|recovery| recovery.pending_restore.is_some())
+        })
     }
 
     async fn reconcile(
@@ -328,7 +403,7 @@ impl KeyboardManagerState {
         };
         if restore_lease.is_some() {
             // A keyboard's restore stays on its own route.
-            retry_pending_restores(&mut self.slots, &channels.access.registry, now, |_| None).await;
+            retry_pending_restores(&mut self.slots, &channels.access.registry, now).await;
         }
 
         for (target, dispatch) in wanted {

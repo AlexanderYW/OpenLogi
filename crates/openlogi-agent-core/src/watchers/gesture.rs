@@ -28,26 +28,23 @@ use std::sync::Arc;
 use openlogi_core::device_order::PhysicalDeviceKey;
 use openlogi_core::scroll::ScrollDelta;
 use openlogi_hid::{
-    CaptureHost, CaptureSessionOutcome, CaptureSessionStop, CapturedInput, DeviceRoute,
-    PendingCaptureRestore, run_capture_session,
+    CaptureHost, CaptureSessionOutcome, CaptureSessionStop, CapturedInput, PendingCaptureRestore,
+    run_capture_session,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use self::dispatch::InputDispatcher;
-use super::capture_manager::{
-    self, CaptureManager, ManagedSlot, ManagerInputs, PendingRestore, acquire_session_lease,
-    expedite_pending_restores, has_pending_restores, next_deadline, retry_pending_restores,
-};
-use super::capture_session::{CaptureRecovery, CaptureSession, ReconcileAction};
+use super::capture_manager::{self, CaptureManager, ManagerInputs, PendingRestore};
+use super::capture_session::{CaptureRecovery, CaptureSession, CaptureSlot, ReconcileAction};
 use super::retry::RETRY_DELAY;
 use super::shutdown::{ManagerCompletion, WatcherHandle};
 use crate::capture_plan::{
     CapturePublication, CaptureTarget, DeviceCapturePlan, DispatchPlan, SharedCapturePlans,
 };
 use crate::hardware::DeviceAccess;
-use crate::receiver_access::{ReceiverRequestState, SessionReceiverLease};
+use crate::receiver_access::{ReceiverAccess, ReceiverRequestState, SessionReceiverLease};
 use crate::runtime::hook::SharedHookMaps;
 use crate::runtime::scroll::ScrollInputHandle;
 use crate::runtime::{ActionDispatcher, HidppSessionId};
@@ -121,7 +118,7 @@ pub fn spawn(
 }
 
 type RunningSession = CaptureSession<CaptureTarget, DispatchPlan, CaptureSessionStop>;
-type GestureSlot = ManagedSlot<CaptureTarget, DispatchPlan>;
+type GestureSlot = CaptureSlot<CaptureTarget, DispatchPlan, PendingRestore, CaptureSessionStop>;
 
 struct CapturedEvent {
     physical_key: PhysicalDeviceKey,
@@ -293,14 +290,78 @@ fn reconcile_published_session(
     }
 }
 
-/// Where each slot's owed restore should now go: the route the latest
-/// physical-device publication names for its key, which includes devices
-/// capture skips. `None` (no publication to trust) keeps every token on its
-/// current route.
-fn restore_routes(
+fn acquire_session_lease(
+    receiver_access: &ReceiverAccess,
+    lease: &mut std::sync::Weak<SessionReceiverLease>,
+) -> Option<Arc<SessionReceiverLease>> {
+    if let Some(existing) = lease.upgrade() {
+        return Some(existing);
+    }
+    let fresh = Arc::new(receiver_access.try_acquire_for_session()?);
+    *lease = Arc::downgrade(&fresh);
+    Some(fresh)
+}
+
+/// Retry owed restores. `routes` is the latest physical-device publication; `None` keeps each token on its current route.
+async fn retry_pending_restores(
+    slots: &mut HashMap<PhysicalDeviceKey, GestureSlot>,
+    registry: &openlogi_hid::ChannelRegistry,
     routes: Option<&CapturePublication>,
-) -> impl Fn(&PhysicalDeviceKey) -> Option<DeviceRoute> + '_ {
-    move |key| routes.and_then(|routes| routes.restore_route(key)).cloned()
+    now: Instant,
+) {
+    let keys: Vec<_> = slots
+        .iter()
+        .filter(|(_, slot)| {
+            slot.recovery()
+                .and_then(|recovery| recovery.pending_restore.as_ref())
+                .is_some_and(|pending| pending.retry_at <= now)
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in keys {
+        let Some(GestureSlot::Recovering(mut recovery)) = slots.remove(&key) else {
+            continue;
+        };
+        let Some(pending) = recovery.pending_restore.take() else {
+            slots.insert(key, GestureSlot::Recovering(recovery));
+            continue;
+        };
+        // Routes include devices capture skips. A same-route retry keeps the
+        // replacement-only policy set by a channel change.
+        let elected = routes
+            .and_then(|routes| routes.restore_route(&key))
+            .cloned();
+        let outcome = match elected {
+            Some(route) if route != *pending.token.route() => {
+                pending.token.retry_via(route, registry).await
+            }
+            _ => pending.token.retry(registry).await,
+        };
+        if let CaptureSessionOutcome::RestorePending(token) = outcome {
+            recovery.pending_restore = Some(PendingRestore {
+                token,
+                retry_at: Instant::now() + RETRY_DELAY,
+            });
+        }
+        if !recovery.is_empty() {
+            slots.insert(key, GestureSlot::Recovering(recovery));
+        }
+    }
+}
+
+fn next_deadline(
+    requests: ReceiverRequestState,
+    device_io_allowed: bool,
+    slots: &HashMap<PhysicalDeviceKey, GestureSlot>,
+) -> Option<Instant> {
+    if requests.any() || !device_io_allowed {
+        return None;
+    }
+    slots
+        .values()
+        .filter_map(GestureSlot::recovery)
+        .filter_map(|recovery| recovery.next_deadline(|pending| pending.retry_at))
+        .min()
 }
 
 impl GestureManagerState {
@@ -317,11 +378,22 @@ impl GestureManagerState {
     }
 
     fn expedite_pending_restores(&mut self) {
-        expedite_pending_restores(&mut self.slots);
+        let now = Instant::now();
+        for slot in self.slots.values_mut() {
+            if let Some(pending) = slot
+                .recovery_mut()
+                .and_then(|recovery| recovery.pending_restore.as_mut())
+            {
+                pending.retry_at = now;
+            }
+        }
     }
 
     fn has_pending_restores(&self) -> bool {
-        has_pending_restores(&self.slots)
+        self.slots.values().any(|slot| {
+            slot.recovery()
+                .is_some_and(|recovery| recovery.pending_restore.is_some())
+        })
     }
 
     async fn reconcile(
@@ -383,13 +455,7 @@ impl GestureManagerState {
         };
         if restore_lease.is_some() {
             let routes = (!requests.any()).then_some(published.as_ref());
-            retry_pending_restores(
-                &mut self.slots,
-                &channels.access.registry,
-                now,
-                restore_routes(routes),
-            )
-            .await;
+            retry_pending_restores(&mut self.slots, &channels.access.registry, routes, now).await;
         }
 
         for plan in wanted {
@@ -538,8 +604,8 @@ async fn drain_for_shutdown(
             retry_pending_restores(
                 &mut state.slots,
                 &channels.access.registry,
+                Some(&publication),
                 Instant::now(),
-                restore_routes(Some(&publication)),
             )
             .await;
         }
