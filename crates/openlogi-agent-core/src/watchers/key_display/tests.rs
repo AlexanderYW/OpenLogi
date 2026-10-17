@@ -279,3 +279,20 @@ fn an_acknowledged_write_ends_the_retries() {
 
     assert_eq!(painted.next_retry(), None);
 }
+
+#[test]
+fn a_failure_with_nothing_left_to_paint_needs_no_retry() {
+    let mut painted = Painted::default();
+    let now = Instant::now();
+    let copy = [spec(keypad(0xc354), 0, &[GridKey::Middle])];
+    let plan = painted.plan(&copy, now);
+    record_all(&mut painted, &plan);
+
+    // A rebind whose write fails, then a return to the face already shown.
+    let blank = [spec(keypad(0xc354), 0, &[])];
+    let plan = painted.plan(&blank, now);
+    painted.failed(plan[0].spec, now);
+
+    assert!(painted.plan(&copy, now + RETRY_DELAY).is_empty());
+    assert_eq!(painted.next_retry(), None);
+}
