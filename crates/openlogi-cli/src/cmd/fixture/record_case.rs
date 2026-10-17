@@ -11,9 +11,7 @@ use openlogi_core::single_instance::{self, InstanceGuard, Role};
 use openlogi_device::write::{
     self, FeatureEntry, FirmwareEntity, ReprogControlEntry, ScrollWheelMode, WriteError,
 };
-use openlogi_device::{
-    BacklightState, BrightnessState, DeviceRoute, DpiInfo, HidBackend, SmartShiftStatus,
-};
+use openlogi_device::{BacklightState, DeviceRoute, DpiInfo, HidBackend, SmartShiftStatus};
 use openlogi_fixture::HidCassette;
 use openlogi_hid::recording::{
     HidCassetteAudit, HidCassetteIdentityPlan, NativeRecorder, NativeRecording,
@@ -79,8 +77,6 @@ pub enum FixtureOperation {
     WheelMode,
     /// Read keyboard backlight state.
     BacklightState,
-    /// Read the brightness level and range.
-    BrightnessState,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -93,11 +89,10 @@ enum SemanticObservation {
     SmartshiftStatus(Result<SmartShiftStatus, WriteError>),
     WheelMode(Result<ScrollWheelMode, WriteError>),
     BacklightState(Result<BacklightState, WriteError>),
-    BrightnessState(Result<BrightnessState, WriteError>),
 }
 
 impl FixtureOperation {
-    pub(super) const ALL: [Self; 9] = [
+    pub(super) const ALL: [Self; 8] = [
         Self::FeatureTable,
         Self::FirmwareEntities,
         Self::ReprogrammableControls,
@@ -106,7 +101,6 @@ impl FixtureOperation {
         Self::SmartshiftStatus,
         Self::WheelMode,
         Self::BacklightState,
-        Self::BrightnessState,
     ];
 
     pub(super) const fn slug(self) -> &'static str {
@@ -119,7 +113,6 @@ impl FixtureOperation {
             Self::SmartshiftStatus => "smartshift-status",
             Self::WheelMode => "wheel-mode",
             Self::BacklightState => "backlight-state",
-            Self::BrightnessState => "brightness-state",
         }
     }
 
@@ -149,9 +142,6 @@ impl FixtureOperation {
             Self::BacklightState => {
                 SemanticObservation::BacklightState(write::get_backlight(backend, route).await)
             }
-            Self::BrightnessState => {
-                SemanticObservation::BrightnessState(write::get_brightness(backend, route).await)
-            }
         }
     }
 }
@@ -170,15 +160,13 @@ impl SemanticObservation {
             | Self::DpiInfo(Err(error))
             | Self::SmartshiftStatus(Err(error))
             | Self::WheelMode(Err(error))
-            | Self::BacklightState(Err(error))
-            | Self::BrightnessState(Err(error)) => replayable_error(error),
+            | Self::BacklightState(Err(error)) => replayable_error(error),
             Self::ReprogrammableControls(Ok(_))
             | Self::RawBattery(Ok(_))
             | Self::DpiInfo(Ok(_))
             | Self::SmartshiftStatus(Ok(_))
             | Self::WheelMode(Ok(_))
-            | Self::BacklightState(Ok(_))
-            | Self::BrightnessState(Ok(_)) => true,
+            | Self::BacklightState(Ok(_)) => true,
         };
         if replayable {
             Ok(())

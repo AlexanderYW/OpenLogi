@@ -333,11 +333,6 @@ async fn capture_hidpp_settings(
     )
     .await?;
 
-    let brightness = gated_read("brightness", device.online, capabilities.brightness, || {
-        agent::call(client.read_brightness(context::current(), source_route.clone()))
-    })
-    .await?;
-
     Ok(ProfileDeviceSettings {
         route: profile_route,
         dpi,
@@ -348,7 +343,6 @@ async fn capture_hidpp_settings(
         report_rate,
         easy_switch,
         pointer_speed,
-        brightness,
         lighting: profile_support(capabilities.lighting),
         light: ProfileSupport::Unsupported,
     })
@@ -428,7 +422,6 @@ fn capture_standalone(source: &StandaloneDevice) -> Result<ProfileCaptureParts> 
         report_rate: ProfileSetting::Unsupported,
         easy_switch: ProfileSetting::Unsupported,
         pointer_speed: ProfileSetting::Unsupported,
-        brightness: ProfileSetting::Unsupported,
         lighting: ProfileSupport::Unsupported,
         light: profile_support(light_supported),
     };

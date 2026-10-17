@@ -273,12 +273,6 @@ pub enum HidppOperation {
     /// Light or darken the `0x1300` DPI LED. Appended last — variant order
     /// is wire format.
     WriteLed,
-    /// Read the `0x8040` brightness level and range. Appended last — variant
-    /// order is wire format.
-    ReadBrightness,
-    /// Write the `0x8040` brightness level. Appended last — variant order is
-    /// wire format.
-    WriteBrightness,
     /// Write an image to a keypad's LCD key over the vendor image report.
     /// Appended last — variant order is wire format.
     WriteKeyImage,

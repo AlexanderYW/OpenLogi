@@ -1,4 +1,4 @@
-//! Per-device settings the orchestrator derives: wheel mode, brightness, host-switch links and the DPI cycle.
+//! Per-device settings the orchestrator derives: wheel mode, host-switch links and the DPI cycle.
 
 use std::collections::BTreeMap;
 
@@ -497,28 +497,6 @@ fn a_reconnect_links_each_pair_that_the_device_is_part_of() {
             cookie_write("trackball", 3, &[], &[lead(1)]),
         ]
     );
-}
-
-#[test]
-fn configured_brightness_reapplies_only_a_chosen_level_to_a_brightness_device() {
-    let mut config = Config::default();
-    let mut device = dev("keypad", 1, true);
-    device.capabilities = Some(Capabilities {
-        brightness: true,
-        ..Capabilities::default()
-    });
-    // Never chosen: the device keeps whatever it holds.
-    assert_eq!(configured_brightness(&config, &device), None);
-
-    config.set_brightness("keypad", 40);
-    assert_eq!(configured_brightness(&config, &device), Some(40));
-
-    // A persisted level for a device that no longer reports 0x8040, or whose
-    // capabilities are not known yet, is not written.
-    device.capabilities = Some(Capabilities::default());
-    assert_eq!(configured_brightness(&config, &device), None);
-    device.capabilities = None;
-    assert_eq!(configured_brightness(&config, &device), None);
 }
 
 #[test]

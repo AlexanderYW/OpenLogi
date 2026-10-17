@@ -205,11 +205,6 @@ pub struct Capabilities {
     /// there too. Appended: crosses the IPC and the persisted identity.
     #[serde(default)]
     pub pointer_scaling: bool,
-    /// Display brightness can be read and written — HID++ `0x8040`
-    /// BrightnessControl, which the MX Creative Keypad reports for its LCD
-    /// keys. Appended: crosses the IPC and the persisted identity.
-    #[serde(default)]
-    pub brightness: bool,
 }
 
 impl Capabilities {
@@ -246,7 +241,6 @@ impl Capabilities {
             // cannot say which controls report raw wheel.
             virtual_thumbwheel: false,
             pointer_scaling: !pointer && ids.contains(&0x2205),
-            brightness: ids.contains(&0x8040),
         }
     }
 
@@ -768,7 +762,6 @@ mod tests {
                     easy_switch: false,
                     virtual_thumbwheel: false,
                     pointer_scaling: false,
-                    brightness: false,
                 }),
                 settings_revision: 0,
             }],
@@ -888,7 +881,6 @@ mod tests {
                 easy_switch: false,
                 virtual_thumbwheel: false,
                 pointer_scaling: false,
-                brightness: false,
             }
         );
         assert!(!Capabilities::from_feature_ids(&[0x0003, 0x1b04]).thumbwheel);
@@ -913,7 +905,6 @@ mod tests {
                 easy_switch: false,
                 virtual_thumbwheel: false,
                 pointer_scaling: false,
-                brightness: false,
             }
         );
         // No driving features → nothing offered.
@@ -959,9 +950,6 @@ mod tests {
         assert!(Capabilities::from_feature_ids(&[0x0001, 0x40a2]).fn_lock);
         assert!(Capabilities::from_feature_ids(&[0x0001, 0x40a0]).fn_lock);
         assert!(!Capabilities::from_feature_ids(&[0x0001, 0x1982]).fn_lock);
-        // BrightnessControl (0x8040) earns the brightness bit; nothing else does.
-        assert!(Capabilities::from_feature_ids(&[0x0001, 0x8040]).brightness);
-        assert!(!Capabilities::from_feature_ids(&[0x0001, 0x1982]).brightness);
     }
 
     #[test]
@@ -1034,6 +1022,18 @@ mod tests {
     }
 
     #[test]
+    fn caps_lock_shows_everywhere_and_num_and_scroll_lock_not_on_macos() {
+        assert!(LockKey::CapsLock.is_indicated_here());
+        for key in [LockKey::NumLock, LockKey::ScrollLock] {
+            assert_eq!(
+                key.is_indicated_here(),
+                !cfg!(target_os = "macos"),
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
     fn only_keyboards_and_numpads_are_keyboard_family() {
         assert!(DeviceKind::Keyboard.is_keyboard_family());
         assert!(DeviceKind::Numpad.is_keyboard_family());
@@ -1043,18 +1043,6 @@ mod tests {
             DeviceKind::Unknown,
         ] {
             assert!(!kind.is_keyboard_family(), "{kind:?}");
-        }
-    }
-
-    #[test]
-    fn caps_lock_shows_everywhere_and_num_and_scroll_lock_not_on_macos() {
-        assert!(LockKey::CapsLock.is_indicated_here());
-        for key in [LockKey::NumLock, LockKey::ScrollLock] {
-            assert_eq!(
-                key.is_indicated_here(),
-                !cfg!(target_os = "macos"),
-                "{key:?}"
-            );
         }
     }
 }

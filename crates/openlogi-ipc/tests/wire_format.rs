@@ -43,12 +43,12 @@ use openlogi_core::device::{
     LightValueUnit, LockKey, PairedDevice, RawDeviceAddress, ReceiverInfo, StandaloneDevice,
 };
 use openlogi_core::hid::{
-    BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus,
-    BrightnessState, Click, DeviceRoute, Dpi, DpiCapabilities, DpiInfo, EasySwitchHosts,
-    EasySwitchSlot, FnLockState, HidppFeatureErrorKind, HidppOperation, HostConnection, HostOsInfo,
-    HostOsKind, LightCommand, PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo,
-    ScrollReportingTarget, ScrollWheelMode, SmartShiftAutoDisengage, SmartShiftMode,
-    SmartShiftStatus, SmartShiftThreshold, TunableTorque, WriteError,
+    BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus, Click,
+    DeviceRoute, Dpi, DpiCapabilities, DpiInfo, EasySwitchHosts, EasySwitchSlot, FnLockState,
+    HidppFeatureErrorKind, HidppOperation, HostConnection, HostOsInfo, HostOsKind, LightCommand,
+    PasskeyMethod, ReceiverSelector, ReportRate, ReportRateInfo, ScrollReportingTarget,
+    ScrollWheelMode, SmartShiftAutoDisengage, SmartShiftMode, SmartShiftStatus,
+    SmartShiftThreshold, TunableTorque, WriteError,
 };
 use openlogi_ipc::{
     ActionRingCommandError, ActionRingInvocation, ActionRingPresentation, AgentRequest,
@@ -483,32 +483,7 @@ fn action_ring_types() {
     assert_wire(&HidppOperation::WriteOsLayout, "12");
     assert_wire(&HidppOperation::ReadReportRate, "13");
     assert_wire(&HidppOperation::WriteReportRate, "14");
-    assert_wire(&HidppOperation::ReadBrightness, "18");
-    assert_wire(&HidppOperation::WriteBrightness, "19");
-    assert_wire(&HidppOperation::WriteKeyImage, "1a");
-}
-
-#[test]
-fn brightness_requests() {
-    assert_wire(
-        &AgentRequest::ReadBrightness {
-            route: DeviceRoute::Bolt {
-                receiver_uid: "F00DCAFE".into(),
-                slot: 1,
-            },
-        },
-        "2a0008463030444341464501",
-    );
-    assert_wire(
-        &AgentRequest::SetBrightness {
-            route: DeviceRoute::Bolt {
-                receiver_uid: "F00DCAFE".into(),
-                slot: 1,
-            },
-            level: 50,
-        },
-        "2b000846303044434146450132",
-    );
+    assert_wire(&HidppOperation::WriteKeyImage, "18");
 }
 
 /// The keypad page actions are appended `Action` variants, and a later page's
@@ -709,14 +684,13 @@ fn device_inventory() {
                 easy_switch: true,
                 virtual_thumbwheel: true,
                 pointer_scaling: true,
-                brightness: false,
             }),
             settings_revision: 7,
         }],
     }];
     assert_wire(
         &inventory,
-        "010d426f6c74205265636569766572fb6d04fb48c501084630304443414645010101094d58204d535452335301fb34b00001010150020001030106323134304c5a0102030400010100fb34b0fb8240000b01010100000101010101000101010101010007",
+        "010d426f6c74205265636569766572fb6d04fb48c501084630304443414645010101094d58204d535452335301fb34b00001010150020001030106323134304c5a0102030400010100fb34b0fb8240000b010101000001010101010001010101010107",
     );
 }
 
@@ -876,14 +850,6 @@ fn semantic_read_payloads() {
         default_fn_lock: None,
     });
     assert_wire(&legacy, "000100");
-
-    let brightness: Result<BrightnessState, WriteError> = Ok(BrightnessState {
-        level: 61,
-        min: 1,
-        max: 100,
-        steps: 25,
-    });
-    assert_wire(&brightness, "003d016419");
 }
 
 /// A light the agent reads over HID++, with a brightness limit and settings
