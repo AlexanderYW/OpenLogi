@@ -60,7 +60,7 @@ openlogi fixture contribute \
 The first run talks only to the running Agent and writes a privacy-safe semantic
 profile plus resumable state. It then asks you to stop the Agent and rerun the
 same command. The second run uses the CLI's own HID permission to capture all
-eight supported read-only operations, self-replays them, generates the exact
+nine supported read-only operations, self-replays them, generates the exact
 identity ledger and case relationships, and runs strict on-disk verification.
 Nothing is uploaded automatically.
 

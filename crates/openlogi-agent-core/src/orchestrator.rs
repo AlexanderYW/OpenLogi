@@ -59,10 +59,10 @@ mod lights;
 use devices::reapply_targets;
 use devices::{
     RECONNECT_REAPPLY_CONFIRM_RETRIES, VOLATILE_REAPPLY_CONFIRM_RETRIES,
-    any_device_needs_capture_rearm, build_devices, config_keeps_os_layout, configured_report_rate,
-    configured_wheel_mode, host_switch_links, is_hidpp_device, keeps_os_layout, main_wheel_divert,
-    newly_kept_os_layouts, os_layout_appeared, pick_current, plan_reapply, settings_moved,
-    stable_id, wheel_inverted,
+    any_device_needs_capture_rearm, build_devices, config_keeps_os_layout, configured_brightness,
+    configured_report_rate, configured_wheel_mode, host_switch_links, is_hidpp_device,
+    keeps_os_layout, main_wheel_divert, newly_kept_os_layouts, os_layout_appeared, pick_current,
+    plan_reapply, settings_moved, stable_id, wheel_inverted,
 };
 
 /// The minimal per-device facts the agent needs: the config key (binding /
@@ -1056,7 +1056,7 @@ impl Orchestrator {
     }
 
     /// Push the persisted volatile settings (lighting, sensor DPI, SmartShift,
-    /// native wheel mode) to one device. Mouse settings run on one background
+    /// native wheel mode, Fn-lock, brightness) to one device. Mouse settings run on one background
     /// thread and one HID++ channel so concurrent multi-open of the same
     /// receiver cannot cross-talk (#485); lighting stays a separate path
     /// (keyboards / different feature).
@@ -1097,6 +1097,9 @@ impl Orchestrator {
             self.shared.write_fn_lock_in_background(&route, fn_lock);
         }
         self.keep_os_layout(dev);
+        if let Some(level) = configured_brightness(&self.config, dev) {
+            crate::hardware::restore_brightness_in_background(self.shared.device(&route), level);
+        }
         if let Some(capabilities) = dev.light_capabilities
             && let Some(light) = self.effective_light_settings(key)
         {

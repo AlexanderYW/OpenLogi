@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use openlogi_core::device::{Capabilities, DeviceInventory, LightCapabilities, StandaloneDevice};
 use openlogi_core::hid::{
-    BacklightState, BacklightStatus, DIRECT_DEVICE_INDEX, DeviceRoute, DpiInfo, EasySwitchHosts,
-    FnLockState, ReportRateInfo, ScrollWheelMode, SmartShiftStatus,
+    BacklightState, BacklightStatus, BrightnessState, DIRECT_DEVICE_INDEX, DeviceRoute, DpiInfo,
+    EasySwitchHosts, FnLockState, ReportRateInfo, ScrollWheelMode, SmartShiftStatus,
 };
 use serde::{Deserialize, Deserializer, Serialize, de};
 use thiserror::Error;
@@ -197,6 +197,10 @@ pub struct ProfileDeviceSettings {
     /// recorded before it existed keep loading.
     #[serde(default = "ProfileSetting::unsupported")]
     pub easy_switch: ProfileSetting<EasySwitchHosts>,
+    /// Brightness-control read state. Defaults to unsupported so profiles
+    /// recorded before it existed keep loading.
+    #[serde(default = "ProfileSetting::unsupported")]
+    pub brightness: ProfileSetting<BrightnessState>,
     /// RGB keyboard-lighting write support.
     pub lighting: ProfileSupport,
     /// Standalone-light command support.

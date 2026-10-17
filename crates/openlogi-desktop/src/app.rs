@@ -17,6 +17,7 @@ use self::menu::{APP_KEY_CONTEXT, CloseWindow, Minimize, NavigateBack, Zoom};
 use crate::features::action_ring::ActionRingPanel;
 use crate::features::camera::controls::CameraControlsPanel;
 use crate::features::camera::preview::CameraPreview;
+use crate::features::display::BrightnessPanel;
 use crate::features::keyboard::function_row::FunctionRowView;
 use crate::features::lighting::keyboard_rgb::LightingPanel;
 use crate::features::lighting::standalone::LightPanel;
@@ -193,6 +194,7 @@ pub struct AppView {
     keyboard_model: Entity<FunctionRowView>,
     dpi_panel: Entity<DpiPanel>,
     smartshift_panel: Entity<SmartShiftPanel>,
+    brightness_panel: Entity<BrightnessPanel>,
     lighting_panel: Entity<LightingPanel>,
     camera_preview: Entity<CameraPreview>,
     camera_controls: Entity<CameraControlsPanel>,
@@ -266,6 +268,7 @@ impl AppView {
         let keyboard_model = cx.new(FunctionRowView::new);
         let dpi_panel = cx.new(DpiPanel::new);
         let smartshift_panel = cx.new(SmartShiftPanel::new);
+        let brightness_panel = cx.new(BrightnessPanel::new);
         let lighting_panel = cx.new(LightingPanel::new);
         let camera_preview = cx.new(CameraPreview::new);
         let camera_controls = cx.new(CameraControlsPanel::new);
@@ -287,6 +290,7 @@ impl AppView {
             keyboard_model,
             dpi_panel,
             smartshift_panel,
+            brightness_panel,
             lighting_panel,
             camera_preview,
             camera_controls,
@@ -344,6 +348,7 @@ impl AppView {
             // opened through `removal_obs`.
             StateEvent::SmartShiftChanged(_)
             | StateEvent::ReportRateChanged(_)
+            | StateEvent::BrightnessChanged(_)
             | StateEvent::DeviceRemovalFailed { .. }
             | StateEvent::CameraPermissionChanged
             | StateEvent::DiagnosticsChanged
@@ -660,6 +665,7 @@ impl AppView {
                         keyboard_model: &self.keyboard_model,
                         dpi_panel: &self.dpi_panel,
                         smartshift_panel: &self.smartshift_panel,
+                        brightness_panel: &self.brightness_panel,
                         lighting_panel: &self.lighting_panel,
                         camera_preview: &self.camera_preview,
                         camera_controls: &self.camera_controls,
