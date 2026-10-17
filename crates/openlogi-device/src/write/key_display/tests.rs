@@ -8,7 +8,6 @@ use crate::replay::ReplayChannelHandle;
 const KEYPAD: DeviceRoute = DeviceRoute::Direct {
     vendor_id: 0x046d,
     product_id: 0xc354,
-    identity: None,
 };
 
 fn display() -> KeyDisplay {
@@ -135,7 +134,6 @@ fn only_a_wired_keypad_with_display_keys_has_a_key_display() {
         key_display_for(&DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc355,
-            identity: None,
         })
         .is_none()
     );

@@ -42,7 +42,6 @@ use openlogi_core::device::{
     DeviceKind, DeviceModelInfo, DeviceTransports, LightCapabilities, LightState, LightValueRange,
     LightValueUnit, LockKey, PairedDevice, RawDeviceAddress, ReceiverInfo, StandaloneDevice,
 };
-use openlogi_core::device_order::DeviceIdentity;
 use openlogi_core::hid::{
     BacklightChange, BacklightControls, BacklightMode, BacklightState, BacklightStatus,
     BrightnessState, Click, DeviceRoute, Dpi, DpiCapabilities, DpiInfo, EasySwitchHosts,
@@ -124,27 +123,6 @@ fn config_reload_result() {
     assert_wire(&error, "03626164");
     assert_wire(&Ok::<(), ConfigReloadError>(()), "00");
     assert_wire(&Err::<(), ConfigReloadError>(error), "0103626164");
-}
-
-/// A direct route carries the device's own identity after its VID/PID, so two
-/// identical wired devices are two routes; `DeviceIdentity` is append-only
-/// from here on.
-#[test]
-fn direct_route_carries_device_identity() {
-    let direct = |identity| DeviceRoute::Direct {
-        vendor_id: 0x046d,
-        product_id: 0xc354,
-        identity,
-    };
-    assert_wire(&direct(None), "02fb6d04fb54c300");
-    assert_wire(
-        &direct(Some(DeviceIdentity::Serial("ol-ser-00001".into()))),
-        "02fb6d04fb54c301000c6f6c2d7365722d3030303031",
-    );
-    assert_wire(
-        &direct(Some(DeviceIdentity::Unit([0x4f, 0x4c, 0x44, 0x01]))),
-        "02fb6d04fb54c301014f4c4401",
-    );
 }
 
 /// tarpc encodes the request enum's variant index, so trait *method order* is

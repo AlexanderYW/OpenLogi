@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use openlogi_core::device::DeviceInventory;
-use openlogi_core::device_order::DeviceIdentity;
 use openlogi_core::hid::{DIRECT_DEVICE_INDEX, DeviceRoute, speaks_unifying_protocol};
 use thiserror::Error;
 
@@ -485,63 +484,10 @@ fn verify_setting_routes(
                     ProfileIdentityField::RawHidRouteIdentity,
                 );
             }
-            DeviceRoute::Direct {
-                vendor_id,
-                product_id,
-                identity: Some(identity),
-            } => {
-                let principal = resolve_device_route(
-                    ledger,
-                    &FixtureDeviceRoute::Direct {
-                        vendor_id: *vendor_id,
-                        product_id: *product_id,
-                    },
-                )?;
-                observe_direct_route_identity(observed, ledger, principal, identity)?;
-            }
-            DeviceRoute::Direct { identity: None, .. } => {}
+            DeviceRoute::Direct { .. } => {}
         }
     }
     Ok(())
-}
-
-/// Count the identity a direct settings route carries against the principal
-/// at that route. The route holds [`DeviceIdentity`]'s case-folded serial, so
-/// it resolves against the ledger's serial without regard to case.
-fn observe_direct_route_identity(
-    observed: &mut BTreeMap<CountKey, u32>,
-    ledger: &LedgerIndex<'_>,
-    principal: &str,
-    identity: &DeviceIdentity,
-) -> Result<(), FixtureError> {
-    let field = ProfileIdentityField::DirectRouteIdentity;
-    match identity {
-        DeviceIdentity::Unit(unit) => observe_bytes_for_principal(
-            observed,
-            ledger,
-            principal,
-            SyntheticIdentityKind::DeviceUnitId,
-            unit,
-            field,
-        ),
-        DeviceIdentity::Serial(serial) => {
-            let kind = SyntheticIdentityKind::DeviceSerialNumber;
-            let declared = ledger
-                .values
-                .iter()
-                .find(|((candidate, value), _)| {
-                    *candidate == kind && value.eq_ignore_ascii_case(serial.as_bytes())
-                })
-                .map(|((_, value), _)| String::from_utf8_lossy(value).into_owned())
-                .ok_or_else(|| {
-                    FixtureError::invalid(
-                        "fixture verification",
-                        format!("extra synthetic {kind:?} value not declared by the ledger"),
-                    )
-                })?;
-            observe_profile_for_principal(observed, ledger, principal, kind, &declared, field)
-        }
-    }
 }
 
 fn verify_cassettes(

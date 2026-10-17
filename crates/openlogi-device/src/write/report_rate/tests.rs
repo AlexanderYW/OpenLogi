@@ -180,7 +180,6 @@ fn direct() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc547,
-        identity: None,
     }
 }
 

@@ -155,7 +155,6 @@ impl Session {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
-            identity: None,
         };
         let registry = ChannelRegistry::default();
         registry.replace_node(

@@ -746,49 +746,9 @@ fn every_bound_keyboard_publishes_its_own_spec() {
     );
 }
 
-/// Two identical wired keypads name themselves in their routes, so both
-/// capture — each with its own keys, bindings and LCD faces.
-#[test]
-fn identical_wired_keypads_capture_and_draw_side_by_side() {
-    let mut config = Config::default();
-    config.set_binding(
-        "left",
-        ButtonId::grid(GridKey::Middle),
-        Binding::Single(Action::Copy),
-    );
-    config.set_binding(
-        "right",
-        ButtonId::grid(GridKey::TopLeft),
-        Binding::Single(Action::Paste),
-    );
-    let mut orch = orchestrator(config);
-    orch.devices = vec![
-        wired_keypad_with("left", true, Some(DeviceIdentity::Unit([1, 2, 3, 4]))),
-        wired_keypad_with("right", true, Some(DeviceIdentity::Unit([5, 6, 7, 8]))),
-    ];
-
-    let specs = orch.keyboard_specs_for();
-    assert_eq!(
-        specs
-            .iter()
-            .map(|spec| (
-                spec.config_key.as_str(),
-                spec.grid.keys().copied().collect()
-            ))
-            .collect::<Vec<(&str, Vec<u8>)>>(),
-        [("left", vec![5]), ("right", vec![1])]
-    );
-    assert_ne!(specs[0].route, specs[1].route);
-    assert_eq!(
-        orch.key_display_specs_for().len(),
-        2,
-        "each keypad's LCD is its own target"
-    );
-}
-
-/// Two inventory entries on one route — a direct route without an identity
-/// names only a VID/PID — still reach one device, so they publish one spec:
-/// the online entry's, and with both asleep the first in inventory order.
+/// Two inventory entries on one route — a direct route names only a VID/PID —
+/// still reach one device, so they publish one spec: the online entry's, and
+/// with both asleep the first in inventory order.
 #[test]
 fn entries_sharing_a_route_publish_one_spec_preferring_the_online_one() {
     let mut config = Config::default();
@@ -887,17 +847,11 @@ fn keyboard_spec_never_diverts_reserved_controls() {
 
 /// The registry's MX Creative Keypad, wired: a route the LCD lookup knows.
 fn wired_keypad(key: &str, online: bool) -> AgentDevice {
-    wired_keypad_with(key, online, None)
-}
-
-/// [`wired_keypad`], whose route names the device by `identity`.
-fn wired_keypad_with(key: &str, online: bool, identity: Option<DeviceIdentity>) -> AgentDevice {
     let keypad = &openlogi_device_registry::keypad::KEYPADS[0];
     AgentDevice {
         route: Some(DeviceRoute::Direct {
             vendor_id: keypad.vendor_id,
             product_id: keypad.product_id,
-            identity,
         }),
         slot: DIRECT_DEVICE_INDEX,
         kind: DeviceKind::Numpad,

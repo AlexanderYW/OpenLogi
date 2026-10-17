@@ -263,10 +263,7 @@
       "route": {
         "Direct": {
           "vendor_id": 1133,
-          "product_id": 45088,
-          "identity": {
-            "Unit": [79, 76, 68, 3]
-          }
+          "product_id": 45088
         }
       },
       "dpi": {

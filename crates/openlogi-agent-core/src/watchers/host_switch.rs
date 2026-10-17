@@ -997,7 +997,6 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
-            identity: None,
         };
         let mut state = HostSwitchManagerState::new();
         departed(&mut state, Some(PendingHostSwitchRestore::detached(route)));

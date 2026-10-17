@@ -25,7 +25,6 @@ use tracing::{debug, warn};
 
 use crate::backend::{BackendError, HidBackend, NodeInfo};
 use crate::host_lock::{RECEIVER_REGISTER_TIMEOUT, lock_receiver_registers};
-use crate::inventory::read_device_identity;
 use crate::write::WriteError;
 
 /// Enumerate HID++ candidates and open the channel that reaches `route`.
@@ -49,27 +48,7 @@ pub(crate) async fn open_route_channel(
     if matches!(route, DeviceRoute::RawHid { .. }) {
         return Ok(None);
     }
-    let nodes = backend.enumerate_hidpp().await?;
-    // A direct route's identity is only read back when a same-model twin
-    // shares its VID/PID. A lone node is taken as the device, as before
-    // routes carried identities: the Agent resolves routes through its
-    // inventory-published registry and never reaches this open path, and a
-    // recorded fixture replays exactly the requests one device answered.
-    let has_twin = match route {
-        DeviceRoute::Direct {
-            vendor_id,
-            product_id,
-            identity: Some(_),
-        } => {
-            nodes
-                .iter()
-                .filter(|node| node.vendor_id == *vendor_id && node.product_id == *product_id)
-                .count()
-                > 1
-        }
-        _ => false,
-    };
-    for node in nodes {
+    for node in backend.enumerate_hidpp().await? {
         // A direct route's vendor/product id is on the unopened node, so skip
         // non-matching ones before paying the ~100ms channel-open cost —
         // otherwise every direct write on a host that also has a Bolt receiver
@@ -78,7 +57,6 @@ pub(crate) async fn open_route_channel(
         if let DeviceRoute::Direct {
             vendor_id,
             product_id,
-            ..
         } = route
             && (node.vendor_id != *vendor_id || node.product_id != *product_id)
         {
@@ -121,17 +99,7 @@ pub(crate) async fn open_route_channel(
                     return Ok(Some(channel));
                 }
             }
-            // Among twins a route that names its device reaches only that
-            // device. Without an identity the first node of the model is all
-            // a route can name.
-            DeviceRoute::Direct { identity, .. } => {
-                if !has_twin
-                    || read_device_identity(&channel, DIRECT_DEVICE_INDEX).await == *identity
-                {
-                    return Ok(Some(channel));
-                }
-                debug!(node = %node.id, "direct node is another device of the model — passing it over");
-            }
+            DeviceRoute::Direct { .. } => return Ok(Some(channel)),
             DeviceRoute::RawHid { .. } => unreachable!("raw HID route entered HID++ channel path"),
         }
     }
@@ -176,6 +144,3 @@ pub(crate) async fn find_raw_route_node(
     }
     Ok(matched)
 }
-
-#[cfg(test)]
-mod tests;

@@ -309,7 +309,6 @@ mod tests {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id,
-            identity: None,
         }
     }
 
@@ -329,23 +328,6 @@ mod tests {
         assert_eq!(registry.lookup(&bolt("AABB", 3)), None);
         assert_eq!(registry.lookup(&bolt("CCDD", 2)), None);
         assert_eq!(registry.lookup(&direct(0xb35b)), None);
-    }
-
-    /// Two identical direct devices publish routes naming their own
-    /// identities, so each route finds its own node instead of the first.
-    #[test]
-    fn identical_direct_devices_each_resolve_to_their_own_node() {
-        let keypad = |unit| DeviceRoute::Direct {
-            vendor_id: 0x046d,
-            product_id: 0xc354,
-            identity: Some(openlogi_core::device_order::DeviceIdentity::Unit(unit)),
-        };
-        let registry = Registry::<u8, &'static str>::default();
-        registry.replace_node(1, [keypad([1, 2, 3, 4])], "first");
-        registry.replace_node(2, [keypad([5, 6, 7, 8])], "second");
-
-        assert_eq!(registry.lookup(&keypad([1, 2, 3, 4])), Some("first"));
-        assert_eq!(registry.lookup(&keypad([5, 6, 7, 8])), Some("second"));
     }
 
     #[test]

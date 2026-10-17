@@ -154,9 +154,6 @@ fn canonical_profile_projects_identity_routes_capabilities_and_battery() {
         Some(DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb020,
-            identity: Some(openlogi_core::device_order::DeviceIdentity::Unit([
-                79, 76, 68, 3
-            ])),
         })
     );
     assert_eq!(
