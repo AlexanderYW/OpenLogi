@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use openlogi_core::binding::GridKey;
 pub use openlogi_device_registry::keypad::KeyDisplay;
-use openlogi_device_registry::keypad::{PanelPoint, find_keypad};
+use openlogi_device_registry::keypad::PanelPoint;
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -52,17 +52,11 @@ const ACK_ACCEPTED: [u8; 2] = [0x00, 0x01];
 const ACK_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The LCD key panel of the device at `route`, or `None` when its keys are not
-/// displays. Only a direct (wired) keypad the registry knows has one.
+/// displays: only a keypad the route reaches ([`DeviceRoute::keypad`]) has
+/// one.
 #[must_use]
 pub fn key_display_for(route: &DeviceRoute) -> Option<KeyDisplay> {
-    let DeviceRoute::Direct {
-        vendor_id,
-        product_id,
-    } = route
-    else {
-        return None;
-    };
-    find_keypad(*vendor_id, *product_id).map(|keypad| keypad.key_display)
+    route.keypad().map(|keypad| keypad.key_display)
 }
 
 /// A baseline JPEG small enough for the image write's `u16` length field.
