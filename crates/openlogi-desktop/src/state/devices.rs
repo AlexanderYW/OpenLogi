@@ -179,14 +179,20 @@ impl super::AppState {
         if links.next().is_some() {
             return None;
         }
-        let (vendor, product) = link.strip_prefix("direct:")?.split_once(':')?;
-        if u16::from_str_radix(vendor, 16).ok()? != LOGITECH_VENDOR_ID {
+        let DeviceRoute::Direct {
+            vendor_id,
+            product_id,
+        } = DeviceStableId::direct_route_of_key(link)?
+        else {
+            return None;
+        };
+        if vendor_id != LOGITECH_VENDOR_ID {
             return None;
         }
         record
             .model_info
             .as_ref()?
-            .transport_for_product_id(u16::from_str_radix(product, 16).ok()?)
+            .transport_for_product_id(product_id)
             .map(ObservedConnection::Direct)
     }
 }
