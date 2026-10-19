@@ -100,14 +100,6 @@ pub struct DeviceRecord {
 }
 
 impl DeviceRecord {
-    /// The known keypad this record is ([`DeviceRoute::keypad`]), or `None`
-    /// for any other device — a number pad among them. Its key grid and
-    /// paging keys are that keypad's identity fact, not every number pad's.
-    #[must_use]
-    pub fn keypad(&self) -> Option<&'static KeypadDescriptor> {
-        self.route.as_ref()?.keypad()
-    }
-
     /// Typed key for `AppState`'s per-device UI caches (DPI/SmartShift load
     /// state, standalone-light overrides, inventory-miss counters). Wraps
     /// [`Self::config_key`] — see [`DeviceKey`].
@@ -159,6 +151,28 @@ impl DeviceRecord {
 }
 
 impl super::AppState {
+    /// The known keypad the selected device is ([`DeviceRoute::keypad`]), or
+    /// `None` for any other device — a number pad among them: the keypad's
+    /// grid and paging keys are its identity fact, not every number pad's.
+    ///
+    /// Online, the live route answers. Offline there is none, so the routes
+    /// the saved entry's `links` record answer instead, and an unplugged
+    /// keypad keeps its keys and app profiles.
+    #[must_use]
+    pub fn current_keypad(&self) -> Option<&'static KeypadDescriptor> {
+        let record = self.current_record()?;
+        if let Some(route) = &record.route {
+            return route.keypad();
+        }
+        self.config
+            .devices
+            .get(&record.config_key)?
+            .links
+            .keys()
+            .filter_map(|key| DeviceStableId::direct_route_of_key(key))
+            .find_map(|route| route.keypad())
+    }
+
     /// Presentation-only connection mode last observed for an offline device.
     /// After restart, only a sole recorded link is unambiguous: the saved link
     /// index has no chronology. Never restore a hardware-write route from history.

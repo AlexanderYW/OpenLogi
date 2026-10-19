@@ -293,8 +293,7 @@ fn keys_tab(
     cx: &mut Context<AppView>,
 ) -> impl IntoElement {
     let keypad = AppState::try_read(cx)
-        .and_then(AppState::current_record)
-        .and_then(DeviceRecord::keypad)
+        .and_then(AppState::current_keypad)
         .is_some();
     v_flex()
         .flex_1()

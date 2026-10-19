@@ -270,9 +270,7 @@ impl Render for FunctionRowView {
         let asset = state.and_then(|state| state.current_record()?.asset.as_ref());
         // Without a record there is no device surface to trust, and the F-row
         // fallback is as honest as anything that shows.
-        let known_keypad = state
-            .and_then(AppState::current_record)
-            .and_then(DeviceRecord::keypad);
+        let known_keypad = state.and_then(AppState::current_keypad);
         let glow = state.and_then(|state| {
             state
                 .current_record()

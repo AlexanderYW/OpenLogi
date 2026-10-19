@@ -5,6 +5,8 @@
 use super::*;
 use crate::services::ipc::Command;
 use openlogi_core::binding::{Cid, GridKey, GridSlot, KeypadPage};
+use openlogi_core::config::DeviceIdentity;
+use openlogi_core::device_order::PhysicalDeviceKey;
 
 pub(crate) fn keypad_state() -> (AppState, tokio::sync::mpsc::UnboundedReceiver<Command>) {
     numpad_state(
@@ -70,10 +72,9 @@ fn slot(number: u8, key: GridKey) -> ButtonId {
 #[test]
 fn only_the_known_keypad_is_a_keypad() {
     let (keypad, _commands) = keypad_state();
-    let record = keypad.current_record().unwrap();
-    assert_eq!(record.kind, DeviceKind::Numpad);
+    assert_eq!(keypad.current_record().unwrap().kind, DeviceKind::Numpad);
     assert_eq!(
-        record.keypad().map(|keypad| keypad.name),
+        keypad.current_keypad().map(|keypad| keypad.name),
         Some("MX Creative Keypad")
     );
 
@@ -86,9 +87,49 @@ fn only_the_known_keypad_is_a_keypad() {
         },
         1,
     );
-    let record = numpad.current_record().unwrap();
-    assert_eq!(record.kind, DeviceKind::Numpad);
-    assert_eq!(record.keypad(), None);
+    assert_eq!(numpad.current_record().unwrap().kind, DeviceKind::Numpad);
+    assert_eq!(numpad.current_keypad(), None);
+}
+
+/// A state whose one device is an unplugged number pad, saved under its
+/// serial with the route it was last reached on.
+fn offline_numpad_state(route_key: &str) -> AppState {
+    let mut config = Config::ephemeral();
+    config.set_device_identity(
+        "serial:keypad-0001",
+        DeviceIdentity {
+            display_name: "MX Creative Keypad".to_string(),
+            kind: DeviceKind::Numpad,
+            capabilities: Capabilities::presumed_from_kind(DeviceKind::Numpad),
+            light_capabilities: None,
+            model_info: None,
+            codename: None,
+            driver_id: None,
+            registry_model_id: None,
+        },
+    );
+    let canonical = PhysicalDeviceKey::parse("serial:keypad-0001").unwrap();
+    assert!(config.adopt_route(&canonical, route_key, None));
+    let (commands, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    AppState::new(Sources::in_memory(config, &AssetResolver::new(), commands))
+}
+
+/// Unplugged, the keypad has no live route, but its saved entry still says
+/// it was reached as that keypad: it keeps its keys and app profiles rather
+/// than falling back to a keyboard's F-row.
+#[test]
+fn an_unplugged_keypad_is_still_the_keypad() {
+    let state = offline_numpad_state("direct:046d:c354");
+    let record = state.current_record().unwrap();
+    assert!(!record.online);
+    assert_eq!(record.route, None);
+    assert_eq!(
+        state.current_keypad().map(|keypad| keypad.name),
+        Some("MX Creative Keypad")
+    );
+
+    let other = offline_numpad_state("direct:046d:c548");
+    assert_eq!(other.current_keypad(), None);
 }
 
 #[test]
