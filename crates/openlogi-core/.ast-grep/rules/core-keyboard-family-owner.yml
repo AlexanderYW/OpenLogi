@@ -13,6 +13,10 @@ files:
 ignores:
   - crates/openlogi-core/src/device.rs
 rule:
+  # A pattern that also names a kind outside the family — an exhaustive match
+  # over every kind, say — decides a different set, not this one.
+  not:
+    regex: 'DeviceKind::(Mouse|Presenter|Remote|Trackball|Touchpad|Tablet|Gamepad|Joystick|Headset|Camera|Unknown|Light)\b'
   any:
     # A match arm, `if let`, or `let` pattern: the or-pattern itself.
     - all:
