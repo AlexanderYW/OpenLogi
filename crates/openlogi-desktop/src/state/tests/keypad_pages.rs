@@ -7,15 +7,27 @@ use crate::services::ipc::Command;
 use openlogi_core::binding::{Cid, GridKey, GridSlot, KeypadPage};
 
 pub(crate) fn keypad_state() -> (AppState, tokio::sync::mpsc::UnboundedReceiver<Command>) {
-    let inventory = DeviceInventory {
-        receiver: ReceiverInfo {
+    numpad_state(
+        ReceiverInfo {
             name: "MX Creative Keypad".to_string(),
             vendor_id: 0x046d,
             product_id: 0xc354,
             unique_id: None,
         },
+        openlogi_core::hid::DIRECT_DEVICE_INDEX,
+    )
+}
+
+/// A state whose one device is a number pad reached through `receiver` at
+/// `slot` — the MX Creative Keypad's own direct node, or any other.
+fn numpad_state(
+    receiver: ReceiverInfo,
+    slot: u8,
+) -> (AppState, tokio::sync::mpsc::UnboundedReceiver<Command>) {
+    let inventory = DeviceInventory {
+        receiver,
         paired: vec![PairedDevice {
-            slot: openlogi_core::hid::DIRECT_DEVICE_INDEX,
+            slot,
             codename: Some("MX Creative Keypad".to_string()),
             wpid: None,
             kind: DeviceKind::Numpad,
@@ -51,6 +63,32 @@ fn slot(number: u8, key: GridKey) -> ButtonId {
         page: page(number),
         key,
     })
+}
+
+/// The keypad's grid and paging keys are its identity, not every number
+/// pad's: one paired to a receiver reports the same kind but is not it.
+#[test]
+fn only_the_known_keypad_is_a_keypad() {
+    let (keypad, _commands) = keypad_state();
+    let record = keypad.current_record().unwrap();
+    assert_eq!(record.kind, DeviceKind::Numpad);
+    assert_eq!(
+        record.keypad().map(|keypad| keypad.name),
+        Some("MX Creative Keypad")
+    );
+
+    let (numpad, _commands) = numpad_state(
+        ReceiverInfo {
+            name: "Bolt Receiver".to_string(),
+            vendor_id: 0x046d,
+            product_id: 0xc548,
+            unique_id: Some("BOLT-0001".to_string()),
+        },
+        1,
+    );
+    let record = numpad.current_record().unwrap();
+    assert_eq!(record.kind, DeviceKind::Numpad);
+    assert_eq!(record.keypad(), None);
 }
 
 #[test]

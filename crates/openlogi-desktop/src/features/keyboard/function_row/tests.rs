@@ -4,13 +4,23 @@ use openlogi_assets::{Assignment, Direction, ImageEntry, Metadata, Origin, Point
 use openlogi_core::binding::{ButtonId, Cid, GridKey};
 use openlogi_core::config::FunctionKey;
 use openlogi_core::device::DeviceKind;
+use openlogi_core::hid::{DeviceRoute, KeypadDescriptor};
 use std::path::PathBuf;
+
+/// The MX Creative Keypad, as its wired route names it.
+fn mx_keypad() -> Option<&'static KeypadDescriptor> {
+    DeviceRoute::Direct {
+        vendor_id: 0x046d,
+        product_id: 0xc354,
+    }
+    .keypad()
+}
 
 /// The F-row the fallback shows: Esc then F1–F19.
 const FUNCTION_KEYS: [FunctionKey; 20] = FunctionKey::ALL;
 
 fn key_points(asset: Option<&ResolvedAsset>) -> Vec<KeyPoint> {
-    key_slots(asset, DeviceKind::Keyboard)
+    key_slots(asset, None)
         .into_iter()
         .map(|slot| slot.point)
         .collect()
@@ -64,7 +74,7 @@ fn fallback_key_positions_cover_the_full_top_row() {
     assert_eq!(positions.first().copied(), Some(EVEN_SPACING_START));
     assert_eq!(positions.last().copied(), Some(EVEN_SPACING_END));
     // Without markers the tab falls back to the OS-hook F-row.
-    let slots = key_slots(None, DeviceKind::Keyboard);
+    let slots = key_slots(None, None);
     assert!(matches!(slots[0].target, KeyTarget::FunctionKey(ref t) if t.to_string() == "esc"));
     assert_eq!(slots[1].legend, "F1");
 }
@@ -77,7 +87,7 @@ fn fallback_key_positions_cover_the_full_top_row() {
 fn a_keypad_without_markers_gets_keycaps_not_the_global_f_row() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
-    let slots = key_slots(None, DeviceKind::Numpad);
+    let slots = key_slots(None, mx_keypad());
 
     assert_eq!(slots.len(), 11, "nine grid keys and two paging keys");
     assert!(
@@ -107,7 +117,7 @@ fn a_keypad_without_markers_gets_keycaps_not_the_global_f_row() {
 /// lies under the first two columns as it does on the chassis.
 #[test]
 fn keypad_keycaps_follow_the_device_layout() {
-    let slots = key_slots(None, DeviceKind::Numpad);
+    let slots = key_slots(None, mx_keypad());
 
     for row in 0..3 {
         let y = slots[row * 3].point.y_frac;
@@ -139,9 +149,9 @@ fn paging_markers_alone_leave_the_keypad_on_the_keycap_map() {
     rust_i18n::set_locale("en");
     let asset = asset_with_controls(&[(0x01a1, 25.20, 82.04), (0x01a2, 49.91, 82.04)]);
 
-    let marked = key_slots(Some(&asset), DeviceKind::Numpad);
+    let marked = key_slots(Some(&asset), mx_keypad());
 
-    assert_eq!(marked, key_slots(None, DeviceKind::Numpad));
+    assert_eq!(marked, key_slots(None, mx_keypad()));
 }
 
 /// Logi's own keypad depot marks no key, so the stock render carries the
@@ -154,13 +164,12 @@ fn the_stock_keypad_render_puts_every_key_on_the_photo() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
 
-    let KeySurface::Photo(stock) =
-        key_surface(Some(&stock_keypad_asset((935, 1105))), DeviceKind::Numpad)
+    let KeySurface::Photo(stock) = key_surface(Some(&stock_keypad_asset((935, 1105))), mx_keypad())
     else {
         panic!("the stock render maps the keys onto the photo");
     };
 
-    let schematic = key_slots(None, DeviceKind::Numpad);
+    let schematic = key_slots(None, mx_keypad());
     assert_eq!(
         stock.iter().map(|slot| &slot.target).collect::<Vec<_>>(),
         schematic
@@ -168,7 +177,7 @@ fn the_stock_keypad_render_puts_every_key_on_the_photo() {
             .map(|slot| &slot.target)
             .collect::<Vec<_>>(),
     );
-    let marked = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+    let marked = key_slots(Some(&keypad_marker_asset()), mx_keypad());
     // The draft's right paging marker sits ~6 px left of that key's centre,
     // so the cross-check stops at the left paging key.
     for (stock, marked) in stock.iter().zip(&marked).take(10) {
@@ -188,7 +197,7 @@ fn a_restaged_keypad_render_falls_back_to_the_keycap_map() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
 
-    let surface = key_surface(Some(&stock_keypad_asset((1057, 1227))), DeviceKind::Numpad);
+    let surface = key_surface(Some(&stock_keypad_asset((1057, 1227))), mx_keypad());
 
     assert!(matches!(surface, KeySurface::Keypad(_)));
 }
@@ -203,7 +212,7 @@ fn grid_markers_put_the_keypad_caps_on_the_photo() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
 
-    let slots = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+    let slots = key_slots(Some(&keypad_marker_asset()), mx_keypad());
 
     assert_eq!(
         slots.len(),
@@ -245,7 +254,7 @@ fn photo_keys_keep_the_render_gaps_between_them() {
     let _locale = crate::services::i18n::LOCALE_LOCK.lock().unwrap();
     rust_i18n::set_locale("en");
     let render = (935., 1105.);
-    let slots = key_slots(Some(&keypad_marker_asset()), DeviceKind::Numpad);
+    let slots = key_slots(Some(&keypad_marker_asset()), mx_keypad());
 
     for (a, b) in slots.iter().zip(&slots[1..]) {
         let (one, two) = (
@@ -285,7 +294,7 @@ fn control_markers_become_control_slots_in_reading_order() {
         (0x00e9, 85.5, 13.8),
     ]);
 
-    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
+    let slots = key_slots(Some(&asset), None);
 
     assert_eq!(slots.len(), 10, "every marked control, no phantom F-keys");
     let targets: Vec<_> = slots.iter().map(|slot| slot.target.clone()).collect();
@@ -321,7 +330,7 @@ fn control_slots_read_row_by_row_and_name_unknown_controls_by_number() {
         (0x00d4, 63.0, 11.0),
     ]);
 
-    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
+    let slots = key_slots(Some(&asset), None);
 
     let legends: Vec<&str> = slots.iter().map(|slot| slot.legend.as_str()).collect();
     assert_eq!(
@@ -350,7 +359,7 @@ fn control_slots_dedupe_repeats_and_skip_easy_switch() {
         assignments: vec![control_assignment(0x00d1, 8.65, 13.8)],
     });
 
-    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
+    let slots = key_slots(Some(&asset), None);
 
     assert_eq!(slots.len(), 1);
     assert_eq!(
@@ -378,7 +387,7 @@ fn control_slots_dedupe_across_image_groups_keeping_the_keys_image_position() {
         ],
     });
 
-    let slots = key_slots(Some(&asset), DeviceKind::Keyboard);
+    let slots = key_slots(Some(&asset), None);
 
     let screen_capture: Vec<_> = slots
         .iter()
@@ -670,7 +679,7 @@ fn only_grid_targets_move_to_the_edited_page() {
     let paging = KeyTarget::Control(ButtonId::Control(Cid::RIGHT_PAGING));
     assert_eq!(paging.clone().on_page(second), paging);
     // Every keypad layout slot starts on page 1, whatever page is edited.
-    let keypad = key_surface(None, DeviceKind::Numpad).slots();
+    let keypad = key_surface(None, mx_keypad()).slots();
     assert!(
         keypad
             .iter()

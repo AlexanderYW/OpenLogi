@@ -15,16 +15,19 @@
 //! keys sit on the device render. Logi's own keypad depot marks none of
 //! them, so for the stock MX Creative Keypad render OpenLogi carries the key
 //! centres measured off that very render ([`stock_keypad_slots`]) and maps
-//! the keys onto it the same way. Any other markerless [`DeviceKind::Numpad`]
-//! shows the device's own keys, the LCD grid keys and paging buttons, as the
-//! keycap layout the device model describes ([`KeyTarget::Grid`]). Either
-//! way every key binds per device like any control.
+//! the keys onto it the same way. Otherwise the known keypad shows its own
+//! keys, the LCD grid keys and paging buttons, as the keycap layout the
+//! device model describes ([`KeyTarget::Grid`]). Either way every key binds
+//! per device like any control. Those keys are the keypad's identity fact
+//! ([`DeviceRoute::keypad`](openlogi_core::hid::DeviceRoute::keypad)): a
+//! number pad that is not that keypad has none of them, and is drawn from
+//! its own markers like a keyboard.
 
 use std::collections::HashSet;
 
 use openlogi_core::binding::{ButtonId, Cid, GridKey, GridSlot, KeypadPage};
 use openlogi_core::config::{FunctionKey, KeyModifiers, KeyTrigger};
-use openlogi_core::device::DeviceKind;
+use openlogi_core::hid::KeypadDescriptor;
 
 use crate::services::assets::ResolvedAsset;
 
@@ -137,15 +140,18 @@ impl KeySurface {
 }
 
 /// Which keys the tab shows, and where. A depot with control markers is
-/// the keyboard's own answer (photo path, kind or no kind); a keypad goes on
+/// the keyboard's own answer (photo path); the known `keypad` goes on
 /// its render when the depot marks its grid or the render is the stock one
 /// OpenLogi measured, else onto the device-model keycap map; any other
 /// markerless device falls back to the OS-hook F-row, which is genuinely
 /// that device's remappable surface only because a full keyboard really has
 /// that row.
-pub(super) fn key_surface(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> KeySurface {
+pub(super) fn key_surface(
+    asset: Option<&ResolvedAsset>,
+    keypad: Option<&KeypadDescriptor>,
+) -> KeySurface {
     if let Some(asset) = asset {
-        let marked = marker_slots(asset, kind);
+        let marked = marker_slots(asset, keypad);
         if !marked.is_empty() {
             // A marked keypad goes onto the photo only once the depot marks
             // the grid too: paging-only markers would show two bubbles and
@@ -155,18 +161,18 @@ pub(super) fn key_surface(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> Ke
             let marks_grid = marked
                 .iter()
                 .any(|slot| matches!(slot.target, KeyTarget::Grid(_)));
-            if marks_grid || !matches!(kind, DeviceKind::Numpad) {
+            if marks_grid || keypad.is_none() {
                 return KeySurface::Photo(marked);
             }
         }
-        if matches!(kind, DeviceKind::Numpad) {
+        if keypad.is_some() {
             return stock_keypad_slots(asset)
                 .map_or_else(|| KeySurface::Keypad(keypad_slots()), KeySurface::Photo);
         }
         if let Some(points) = legacy_pixel_key_points(asset) {
             return KeySurface::Photo(function_key_slots(points));
         }
-    } else if matches!(kind, DeviceKind::Numpad) {
+    } else if keypad.is_some() {
         return KeySurface::Keypad(keypad_slots());
     }
     KeySurface::Photo(function_key_slots(fallback_key_points()))
@@ -175,8 +181,11 @@ pub(super) fn key_surface(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> Ke
 /// The slots `key_surface` drew — a test convenience; render consumes the
 /// surface itself to pick the pane.
 #[cfg(test)]
-pub(super) fn key_slots(asset: Option<&ResolvedAsset>, kind: DeviceKind) -> Vec<KeySlotLayout> {
-    key_surface(asset, kind).slots()
+pub(super) fn key_slots(
+    asset: Option<&ResolvedAsset>,
+    keypad: Option<&KeypadDescriptor>,
+) -> Vec<KeySlotLayout> {
+    key_surface(asset, keypad).slots()
 }
 
 /// Schematic keycap geometry, in CSS px. `function_row`'s `KeypadPane`
@@ -382,14 +391,14 @@ fn stock_keypad_slots(asset: &ResolvedAsset) -> Option<Vec<KeySlotLayout>> {
 /// order, so a key `device_keys_image` marks keeps that position even if
 /// `device_buttons_image` marks it again elsewhere: the keys image is what
 /// the marker calibration was measured against.
-fn marker_slots(asset: &ResolvedAsset, kind: DeviceKind) -> Vec<KeySlotLayout> {
+fn marker_slots(asset: &ResolvedAsset, keypad: Option<&KeypadDescriptor>) -> Vec<KeySlotLayout> {
     // Rows are banded by y; within a band, left to right. Markers on one
     // physical row differ by well under a band.
     const ROW_BAND: f32 = 0.06;
     // The canvas correction exists for Logitech-authored keyboard markers.
     // A keypad depot is OpenLogi's own — its markers are authored against
     // the render the photo shows, so their centres land as authored.
-    let canvas_calibrated = !matches!(kind, DeviceKind::Numpad);
+    let canvas_calibrated = keypad.is_none();
     let mut seen_controls = HashSet::new();
     let mut seen_grid = HashSet::new();
     let mut slots: Vec<KeySlotLayout> = KEY_MARKER_IMAGES
@@ -457,7 +466,7 @@ fn function_key_slots(points: Vec<KeyPoint>) -> Vec<KeySlotLayout> {
 
 #[cfg(test)]
 pub(super) fn key_x_fractions(asset: Option<&ResolvedAsset>) -> Vec<f32> {
-    key_slots(asset, DeviceKind::Keyboard)
+    key_slots(asset, None)
         .into_iter()
         .map(|slot| slot.point.x_frac)
         .collect()

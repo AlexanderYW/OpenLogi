@@ -12,7 +12,7 @@ use openlogi_core::device::{
 use openlogi_core::device_order::{
     DeviceIdentity as RouteIdentity, DeviceStableId, PhysicalDeviceKey,
 };
-use openlogi_core::hid::{DeviceRoute, LOGITECH_VENDOR_ID};
+use openlogi_core::hid::{DeviceRoute, KeypadDescriptor, LOGITECH_VENDOR_ID};
 use tracing::debug;
 
 use super::device_key::DeviceKey;
@@ -100,6 +100,14 @@ pub struct DeviceRecord {
 }
 
 impl DeviceRecord {
+    /// The known keypad this record is ([`DeviceRoute::keypad`]), or `None`
+    /// for any other device — a number pad among them. Its key grid and
+    /// paging keys are that keypad's identity fact, not every number pad's.
+    #[must_use]
+    pub fn keypad(&self) -> Option<&'static KeypadDescriptor> {
+        self.route.as_ref()?.keypad()
+    }
+
     /// Typed key for `AppState`'s per-device UI caches (DPI/SmartShift load
     /// state, standalone-light overrides, inventory-miss counters). Wraps
     /// [`Self::config_key`] — see [`DeviceKey`].

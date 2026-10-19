@@ -35,7 +35,6 @@ use gpui::{
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{Selectable as _, h_flex, input::InputState, v_flex};
 use openlogi_core::binding::{Action, ActionRingIcon, ButtonId, KeypadPage, WorkflowStep};
-use openlogi_core::device::DeviceKind;
 
 use super::editors::{
     PowerUserKind, text_editor_placeholder, text_editor_seed, workflow_editor_seed,
@@ -271,9 +270,9 @@ impl Render for FunctionRowView {
         let asset = state.and_then(|state| state.current_record()?.asset.as_ref());
         // Without a record there is no device surface to trust, and the F-row
         // fallback is as honest as anything that shows.
-        let kind = state
-            .and_then(|state| state.current_record())
-            .map_or(DeviceKind::Keyboard, |record| record.kind);
+        let known_keypad = state
+            .and_then(AppState::current_record)
+            .and_then(DeviceRecord::keypad);
         let glow = state.and_then(|state| {
             state
                 .current_record()
@@ -282,13 +281,12 @@ impl Render for FunctionRowView {
 
         let viewport_h = f32::from(window.viewport_size().height);
         let image_path = asset.map(|asset| asset.image_path.clone());
-        let surface = key_surface(asset, kind);
+        let surface = key_surface(asset, known_keypad);
         let keypad = matches!(surface, KeySurface::Keypad(_));
         // A keypad on its photo draws its keys on the render itself: the
         // keyboard's callout band cannot lay eleven bubbles across a
         // portrait render, and the keys sit under the user's eyes already.
-        let keypad_photo =
-            matches!(surface, KeySurface::Photo(_)) && matches!(kind, DeviceKind::Numpad);
+        let keypad_photo = matches!(surface, KeySurface::Photo(_)) && known_keypad.is_some();
         // The schematic keeps photo and keycaps on one alignment line.
         let photo = asset
             .filter(|asset| asset.png_height > 0)

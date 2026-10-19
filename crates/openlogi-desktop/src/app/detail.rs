@@ -294,7 +294,8 @@ fn keys_tab(
 ) -> impl IntoElement {
     let keypad = AppState::try_read(cx)
         .and_then(AppState::current_record)
-        .is_some_and(|record| matches!(record.kind, DeviceKind::Numpad));
+        .and_then(DeviceRecord::keypad)
+        .is_some();
     v_flex()
         .flex_1()
         .w_full()
