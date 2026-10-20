@@ -115,7 +115,8 @@ struct FailingPanel {
 /// What the watcher believes is on every panel it has painted, and which
 /// panels are refusing writes — the sans-I/O half of the watcher. Only
 /// [`Self::record`] adds a painted face, and only for a write the device
-/// acknowledged.
+/// acknowledged; [`Self::failed`] forgets the face of a key whose write
+/// failed, since a lost acknowledgement may hide a write the device took.
 #[derive(Debug, Default)]
 struct Painted {
     panels: Vec<PaintedPanel>,
@@ -131,24 +132,24 @@ impl Painted {
     ///
     /// Leaves out every key of a failing panel whose retry deadline is after
     /// `now`, and forgets the failures of a panel that left `specs` or whose
-    /// generation moved: either is a new device as far as retries go. Also
-    /// forgets those of a panel with nothing left to paint (a rebind that
-    /// failed was undone), whose retry deadline would otherwise lapse with
-    /// no write to move it and wake the watcher in a busy loop.
+    /// generation moved: either is a new device as far as retries go.
+    ///
+    /// A failing panel always has its failed key left to paint — every spec
+    /// covers every grid key, and [`Self::failed`] forgot that key's face —
+    /// so a lapsed retry deadline is always followed by a write that moves
+    /// or clears it, never by a busy loop.
     fn plan<'a>(&mut self, specs: &'a [KeyDisplaySpec], now: Instant) -> Vec<Paint<'a>> {
         self.panels.retain(|panel| {
             specs
                 .iter()
                 .any(|spec| spec.route == panel.route && spec.generation == panel.generation)
         });
-        let panels = &self.panels;
         self.failing.retain(|failing| {
-            specs.iter().any(|spec| {
-                spec.route == failing.route
-                    && spec.generation == failing.generation
-                    && unpainted(panels, spec).next().is_some()
-            })
+            specs
+                .iter()
+                .any(|spec| spec.route == failing.route && spec.generation == failing.generation)
         });
+        let panels = &self.panels;
         specs
             .iter()
             .filter(|spec| {
@@ -185,10 +186,23 @@ impl Painted {
         }
     }
 
-    /// Note at `now` a failed write to the panel `spec` describes, and push
-    /// its retry deadline out by its backoff. `true` when the panel was not
-    /// already failing, so the failure is news worth a `warn`.
-    fn failed(&mut self, spec: &KeyDisplaySpec, now: Instant) -> bool {
+    /// Note at `now` that `paint`'s write failed, and push its panel's retry
+    /// deadline out by its backoff. `true` when the panel was not already
+    /// failing, so the failure is news worth a `warn`.
+    ///
+    /// Forgets the face recorded for `paint`'s key: a write whose
+    /// acknowledgement was lost may still have landed, so the key may show
+    /// `paint`'s face, its old one, or neither — and returning to the old
+    /// binding must still repaint it.
+    fn failed(&mut self, paint: &Paint, now: Instant) -> bool {
+        let spec = paint.spec;
+        if let Some(panel) = self
+            .panels
+            .iter_mut()
+            .find(|panel| panel.route == spec.route)
+        {
+            panel.faces.remove(&paint.key);
+        }
         if let Some(failing) = self
             .failing
             .iter_mut()
@@ -323,7 +337,7 @@ async fn paint_all(
         match result {
             Ok(()) => painted.record(paint),
             Err(error) => {
-                if painted.failed(paint.spec, Instant::now()) {
+                if painted.failed(paint, Instant::now()) {
                     warn!(%error, %route, key = ?paint.key, "key image write failed — retrying");
                 } else {
                     debug!(%error, %route, key = ?paint.key, "key image write failed again — retrying");

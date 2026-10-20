@@ -40,6 +40,16 @@ fn keys(paints: &[Paint]) -> Vec<GridKey> {
     paints.iter().map(|paint| paint.key).collect()
 }
 
+/// A write of `spec`'s first key — the one a failing keypad fails on.
+fn first_key(spec: &KeyDisplaySpec) -> Paint<'_> {
+    let (key, face) = spec.faces.first_key_value().unwrap();
+    Paint {
+        spec,
+        key: *key,
+        face: *face,
+    }
+}
+
 fn record_all(painted: &mut Painted, paints: &[Paint]) {
     for paint in paints {
         painted.record(paint);
@@ -171,15 +181,15 @@ fn a_keypad_that_keeps_failing_is_reported_once_until_it_recovers() {
     let now = Instant::now();
     let pad = spec(keypad(0xc354), 0, &[]);
 
-    assert!(painted.failed(&pad, now));
-    assert!(!painted.failed(&pad, now));
+    assert!(painted.failed(&first_key(&pad), now));
+    assert!(!painted.failed(&first_key(&pad), now));
     // Another keypad's first failure is its own.
-    assert!(painted.failed(&spec(keypad(0xc355), 0, &[]), now));
+    assert!(painted.failed(&first_key(&spec(keypad(0xc355), 0, &[])), now));
 
     let specs = [pad.clone()];
     let plan = painted.plan(&specs, now + MAX_RETRY_DELAY);
     painted.record(&plan[0]);
-    assert!(painted.failed(&pad, now));
+    assert!(painted.failed(&first_key(&pad), now));
 }
 
 #[test]
@@ -187,13 +197,13 @@ fn a_keypad_that_leaves_and_returns_is_reported_afresh() {
     let mut painted = Painted::default();
     let now = Instant::now();
     let pad = spec(keypad(0xc354), 0, &[]);
-    assert!(painted.failed(&pad, now));
+    assert!(painted.failed(&first_key(&pad), now));
 
     painted.plan(std::slice::from_ref(&pad), now);
-    assert!(!painted.failed(&pad, now));
+    assert!(!painted.failed(&first_key(&pad), now));
 
     painted.plan(&[], now);
-    assert!(painted.failed(&pad, now));
+    assert!(painted.failed(&first_key(&pad), now));
 }
 
 #[test]
@@ -207,12 +217,12 @@ fn a_keypad_that_keeps_failing_is_retried_less_often_up_to_the_cap() {
     let now = Instant::now();
     let pad = spec(keypad(0xc354), 0, &[]);
 
-    painted.failed(&pad, now);
+    painted.failed(&first_key(&pad), now);
     assert_eq!(painted.next_retry(), Some(now + RETRY_DELAY));
-    painted.failed(&pad, now);
+    painted.failed(&first_key(&pad), now);
     assert_eq!(painted.next_retry(), Some(now + RETRY_DELAY * 2));
     for _ in 0..100 {
-        painted.failed(&pad, now);
+        painted.failed(&first_key(&pad), now);
     }
     assert_eq!(painted.next_retry(), Some(now + MAX_RETRY_DELAY));
 }
@@ -222,7 +232,7 @@ fn a_failing_keypad_is_not_painted_before_its_deadline() {
     let mut painted = Painted::default();
     let now = Instant::now();
     let specs = [spec(keypad(0xc354), 0, &[])];
-    painted.failed(&specs[0], now);
+    painted.failed(&first_key(&specs[0]), now);
 
     assert!(painted.plan(&specs, now).is_empty());
     // A respec (an app switch, a rebind) does not bring the retry forward.
@@ -241,9 +251,9 @@ fn each_failing_keypad_waits_out_its_own_deadline() {
     let now = Instant::now();
     let specs = [spec(keypad(0xc354), 0, &[]), spec(keypad(0xc355), 0, &[])];
     for _ in 0..4 {
-        painted.failed(&specs[0], now);
+        painted.failed(&first_key(&specs[0]), now);
     }
-    painted.failed(&specs[1], now);
+    painted.failed(&first_key(&specs[1]), now);
 
     // The fresh failure is due first, and is retried alone: the long-failing
     // keypad keeps its own, later deadline.
@@ -259,7 +269,7 @@ fn a_reconnect_retries_a_failing_keypad_at_once() {
     let mut painted = Painted::default();
     let now = Instant::now();
     for _ in 0..4 {
-        painted.failed(&spec(keypad(0xc354), 0, &[]), now);
+        painted.failed(&first_key(&spec(keypad(0xc354), 0, &[])), now);
     }
 
     let after_reconnect = [spec(keypad(0xc354), 1, &[])];
@@ -272,7 +282,7 @@ fn an_acknowledged_write_ends_the_retries() {
     let mut painted = Painted::default();
     let now = Instant::now();
     let specs = [spec(keypad(0xc354), 0, &[])];
-    painted.failed(&specs[0], now);
+    painted.failed(&first_key(&specs[0]), now);
 
     let plan = painted.plan(&specs, now + RETRY_DELAY);
     painted.record(&plan[0]);
@@ -281,17 +291,26 @@ fn an_acknowledged_write_ends_the_retries() {
 }
 
 #[test]
-fn a_failure_with_nothing_left_to_paint_needs_no_retry() {
+fn a_key_whose_write_failed_is_repainted_even_when_its_old_face_returns() {
     let mut painted = Painted::default();
     let now = Instant::now();
     let copy = [spec(keypad(0xc354), 0, &[GridKey::Middle])];
     let plan = painted.plan(&copy, now);
     record_all(&mut painted, &plan);
 
-    // A rebind whose write fails, then a return to the face already shown.
+    // A rebind whose write fails — perhaps only its acknowledgement was
+    // lost, so the key may show the new face — then a return to the old one.
     let blank = [spec(keypad(0xc354), 0, &[])];
     let plan = painted.plan(&blank, now);
-    painted.failed(plan[0].spec, now);
+    assert_eq!(keys(&plan), [GridKey::Middle]);
+    painted.failed(&plan[0], now);
+
+    assert!(painted.plan(&copy, now).is_empty());
+    assert_eq!(painted.next_retry(), Some(now + RETRY_DELAY));
+    let retry = painted.plan(&copy, now + RETRY_DELAY);
+    assert_eq!(keys(&retry), [GridKey::Middle]);
+    assert_eq!(retry[0].face, KeyFace::Icon(ActionRingIcon::Copy));
+    painted.record(&retry[0]);
 
     assert!(painted.plan(&copy, now + RETRY_DELAY).is_empty());
     assert_eq!(painted.next_retry(), None);
