@@ -10592,6 +10592,7 @@ dependencies = [
  "plist",
  "quote",
  "roxmltree 0.20.0",
+ "semver",
  "serde",
  "serde_json",
  "sha2_hasher",
