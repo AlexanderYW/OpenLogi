@@ -2352,11 +2352,14 @@ fn keyboard_divert_set(bindings: &BTreeMap<ButtonId, Binding>) -> KeyboardDivert
 }
 
 /// Whether `config_key` binds a key the capture session would take over in
-/// its device-wide profile or in any of its per-app profiles. A per-app
-/// override replaces the whole button with a single action, so its presence
-/// captures the key exactly as the same device-wide binding does.
+/// its device-wide profile or in any of its per-app profiles. The
+/// device-wide profile is read with the defaults the session dispatches, so
+/// a keypad with more than one page captures its paging keys even with
+/// nothing else bound. A per-app override replaces the whole button with a
+/// single action, so its presence captures the key exactly as the same
+/// device-wide binding does.
 fn binds_keys_in_some_profile(config: &Config, config_key: &str) -> bool {
-    let device_wide = config.effective_bindings(config_key, None);
+    let device_wide = button_bindings_for(config, Some(config_key), None);
     !keyboard_divert_set(&device_wide).captures_nothing()
         || config
             .app_profiles(config_key)

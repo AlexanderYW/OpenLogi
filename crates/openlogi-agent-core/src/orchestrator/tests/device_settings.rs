@@ -1220,6 +1220,33 @@ fn key_display_specs_carry_the_rearm_generation() {
     assert_eq!(orch.key_display_specs_for()[0].generation, before + 1);
 }
 
+/// With more than one page the paging keys turn the page by default, so a
+/// keypad with nothing else bound still needs its capture session for them.
+#[test]
+fn a_paged_keypad_with_nothing_bound_captures_its_paging_keys() {
+    let mut config = Config::default();
+    config.set_keypad_pages("keypad", page(2));
+    let mut orch = orchestrator(config);
+    orch.devices = vec![wired_keypad("keypad", true)];
+
+    let spec = sole_keyboard_spec(&orch).expect("the paging keys hold a session");
+    let [left, right] = openlogi_core::binding::Cid::PAGING;
+    assert_eq!(
+        spec.wanted.keys().copied().collect::<Vec<_>>(),
+        [left.raw(), right.raw()]
+    );
+    assert_eq!(
+        spec.bindings[&ButtonId::Control(right)],
+        Binding::Single(Action::NextKeypadPage)
+    );
+
+    orch.config.set_keypad_pages("keypad", page(1));
+    assert!(
+        sole_keyboard_spec(&orch).is_none(),
+        "one page leaves the paging keys native"
+    );
+}
+
 fn page(number: u8) -> openlogi_core::binding::KeypadPage {
     openlogi_core::binding::KeypadPage::new(number).expect("a valid page")
 }
