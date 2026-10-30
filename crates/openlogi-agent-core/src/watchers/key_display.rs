@@ -5,8 +5,9 @@
 //! effective bindings the keyboard capture session dispatches. This watcher
 //! owns the device side: it remembers what it last painted on each panel,
 //! renders and writes only the keys that differ, and repaints a whole panel
-//! when the spec's re-arm generation moves (a reconnect or a system wake,
-//! after which the device shows its own default again).
+//! when the spec's panel generation moves (a reconnect — observed or only
+//! announced — or a system wake, after which the device shows its own
+//! default again).
 //!
 //! The images are volatile panel state with nothing to restore: a stop
 //! simply abandons any write in flight.
@@ -46,9 +47,10 @@ pub struct KeyDisplaySpec {
     pub route: DeviceRoute,
     /// Where its keys sit on its panel.
     pub display: KeyDisplay,
-    /// The capture re-arm generation: it moves when a device reconnects or
-    /// the system wakes, and a moved generation means the panel must be
-    /// assumed to have lost what was painted on it.
+    /// The panel generation: it moves whenever the keypad's volatile
+    /// settings re-apply — it came online or reconnected, or the system woke
+    /// — and a moved generation means the panel must be assumed to have lost
+    /// what was painted on it.
     pub generation: u64,
     /// Every key's face.
     pub faces: BTreeMap<GridKey, KeyFace>,

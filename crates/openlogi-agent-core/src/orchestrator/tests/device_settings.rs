@@ -1205,19 +1205,72 @@ fn key_display_specs_need_a_present_enabled_display_keypad() {
     assert!(orch.key_display_specs_for().is_empty());
 }
 
-/// A reconnect or wake bumps the re-arm generation, and the published spec
-/// carries it so the watcher repaints a panel that may have reset.
+/// The wired keypad as the enumerator reports it, so a test drives the
+/// orchestrator's own reconnect handling through inventory refreshes.
+fn keypad_inventory(online: bool) -> DeviceInventory {
+    let keypad = &openlogi_device_registry::keypad::KEYPADS[0];
+    let mut inventory = direct_inventory(None, [1, 2, 3, 4]);
+    inventory.receiver.name = "MX Creative Keypad".to_owned();
+    inventory.receiver.product_id = keypad.product_id;
+    let device = &mut inventory.paired[0];
+    device.codename = Some("MX Creative Keypad".to_owned());
+    device.kind = DeviceKind::Numpad;
+    device.online = online;
+    device.capabilities = Some(Capabilities::presumed_from_kind(DeviceKind::Numpad));
+    inventory
+}
+
+fn panel_generation(orch: &Orchestrator) -> u64 {
+    let specs = orch.key_display_specs_for();
+    let [spec] = specs.as_slice() else {
+        panic!("one keypad publishes one spec: {specs:?}");
+    };
+    spec.generation
+}
+
+/// The panel repaints whenever the keypad's volatile settings re-apply: on
+/// coming back online, and on a reconnect the snapshot cannot show — its own
+/// `0x1d4b` broadcast or a replaced channel, which arrive as a forced
+/// re-apply. A steady snapshot and its confirming re-applies repaint nothing.
 #[test]
-fn key_display_specs_carry_the_rearm_generation() {
+fn every_keypad_reconnect_moves_its_panel_generation() {
     let mut orch = orchestrator(Config::default());
-    orch.devices = vec![wired_keypad("keypad", true)];
-    let before = orch.key_display_specs_for()[0].generation;
+    let online = [keypad_inventory(true)];
+    orch.refresh_inventory(&online, &[], false);
+    let first = panel_generation(&orch);
 
-    orch.shared
-        .capture_rearm_generation
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    orch.refresh_inventory(&online, &[], false);
+    assert_eq!(panel_generation(&orch), first, "a steady snapshot");
 
-    assert_eq!(orch.key_display_specs_for()[0].generation, before + 1);
+    orch.reapply_reconnected_on_next_refresh();
+    orch.refresh_inventory(&online, &[], false);
+    let announced = panel_generation(&orch);
+    assert_ne!(announced, first, "an announced reconnect repaints");
+
+    orch.refresh_inventory(&[keypad_inventory(false)], &[], false);
+    assert!(orch.key_display_specs_for().is_empty(), "nothing to paint");
+    orch.refresh_inventory(&online, &[], false);
+    assert_ne!(
+        panel_generation(&orch),
+        announced,
+        "an observed reconnect repaints"
+    );
+}
+
+/// Another device coming online moves only its own epoch, so the keypad
+/// keeps what it shows.
+#[test]
+fn another_device_reconnecting_leaves_the_keypad_painted() {
+    let mut orch = orchestrator(Config::default());
+    let mut mouse = direct_inventory(Some("mouse"), [9, 9, 9, 9]);
+    mouse.paired[0].online = false;
+    orch.refresh_inventory(&[keypad_inventory(true), mouse.clone()], &[], false);
+    let before = panel_generation(&orch);
+
+    mouse.paired[0].online = true;
+    orch.refresh_inventory(&[keypad_inventory(true), mouse], &[], false);
+
+    assert_eq!(panel_generation(&orch), before);
 }
 
 /// With more than one page the paging keys turn the page by default, so a

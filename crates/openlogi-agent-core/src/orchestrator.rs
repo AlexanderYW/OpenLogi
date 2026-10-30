@@ -560,6 +560,13 @@ pub struct Orchestrator {
     /// Rearm epochs belong to exact routes. Discovery or wake on one link
     /// must not retire a still-running capture on another link.
     capture_route_generations: HashMap<DeviceRoute, u64>,
+    /// Each keypad route's LCD panel epoch, advanced with every re-apply of
+    /// its volatile settings: the images live in device RAM like them, and a
+    /// reconnect the snapshot cannot show (a `0x1d4b` broadcast, a replaced
+    /// channel) re-applies settings without moving any capture epoch.
+    panel_generations: HashMap<DeviceRoute, u64>,
+    /// The last panel epoch handed out.
+    panel_epoch: u64,
     /// Whether the last enumeration pass failed to open HID++ nodes; published
     /// atomically with the inventory so no observation pairs a fresh device
     /// set with a stale flag.
@@ -719,6 +726,8 @@ impl Orchestrator {
             forced_reapply_budget: None,
             forced_capture_rearm: false,
             capture_route_generations: HashMap::new(),
+            panel_generations: HashMap::new(),
+            panel_epoch: 0,
             hid_open_failures: false,
             reapply_followup: BTreeMap::new(),
             disabled_keys_recovery: BTreeMap::new(),
@@ -1069,7 +1078,6 @@ impl Orchestrator {
     /// Only a device whose panel the registry describes qualifies; no kind
     /// gate stands in for that identity fact.
     fn key_display_specs_for(&self) -> Vec<KeyDisplaySpec> {
-        let generation = self.shared.capture_rearm_generation.load(Ordering::Relaxed);
         self.devices
             .iter()
             .filter(|dev| dev.online && self.config.device_enabled(&dev.config_key))
@@ -1084,6 +1092,7 @@ impl Orchestrator {
                     .into_iter()
                     .map(|key| (key, key_face(bindings.get(&ButtonId::grid(key)))))
                     .collect();
+                let generation = self.panel_generations.get(&route).copied().unwrap_or(0);
                 Some(KeyDisplaySpec {
                     route,
                     display,
@@ -1343,6 +1352,7 @@ impl Orchestrator {
         let forced = self.forced_reapply_budget.take();
         let next_current = pick_current(&devices, self.config.selected_device());
         self.rearm_capture_routes(&devices);
+        self.repaint_panels(&devices, forced.is_some());
         // Manual cancellation can happen long after the boot/reconnect ladder
         // drained. Its owner requests only a Disable Keys recovery, and does
         // not consume a request while a successor still owns the setting.
@@ -1516,6 +1526,27 @@ impl Orchestrator {
             }
         }
         debug!(generation, "device route(s) require capture re-arm");
+    }
+
+    /// Move the panel epoch of every device whose volatile settings re-apply
+    /// on this snapshot — a new identity, an offline→online transition, or,
+    /// when `forced`, every online device — so the key-display watcher
+    /// repaints a panel that may have reset. Confirming re-applies repaint
+    /// nothing: the first write already did.
+    fn repaint_panels(&mut self, devices: &[AgentDevice], forced: bool) {
+        self.panel_generations
+            .retain(|route, _| devices.iter().any(|dev| dev.route.as_ref() == Some(route)));
+        let targets = reapply_targets(&self.devices, devices, forced);
+        if targets.is_empty() {
+            return;
+        }
+        self.panel_epoch = self.panel_epoch.wrapping_add(1);
+        for idx in targets {
+            if let Some(route) = &devices[idx].route {
+                self.panel_generations
+                    .insert(route.clone(), self.panel_epoch);
+            }
+        }
     }
 
     /// Reapply settings with the full confirmation budget after a node change
