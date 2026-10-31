@@ -54,9 +54,11 @@ use crate::ui::theme::{self, ACCENT_BLUE, Palette, Typography as _};
 use gpui::ease_in_out;
 use gpui::{Animation, AnimationExt, img};
 
+mod callout_layout;
 mod key_points;
 mod keypad;
 
+use callout_layout::{CalloutLayout, CardRect, callout_layout, side_bands_width};
 pub(crate) use key_points::KeyTarget;
 #[cfg(test)]
 use key_points::{EVEN_SPACING_END, EVEN_SPACING_START, key_x_fractions};
@@ -77,12 +79,14 @@ const CALLOUT_BAND_H: f32 = 118.;
 /// padding, footer) — the viewport height minus this and the callout band is
 /// what the render may occupy before it scales down to fit.
 const KEYS_VERTICAL_RESERVE: f32 = 224.;
+/// Horizontal chrome around the Keys tab body: the device rail and the tab's
+/// padding.
+const KEYS_HORIZONTAL_RESERVE: f32 = crate::ui::theme::DETAIL_RAIL_W + 48.;
 /// Floor on the render height so a tiny window still shows a usable model.
 const KEYBOARD_MIN_IMG_H: f32 = 160.;
-const KEY_CALLOUT_W: f32 = 60.;
 const KEY_CALLOUT_H: f32 = 48.;
-const KEY_CALLOUT_TOP_UPPER: f32 = 4.;
-const KEY_CALLOUT_TOP_LOWER: f32 = 50.;
+const KEY_CALLOUT_TOP_UPPER: f32 = 2.;
+const KEY_CALLOUT_TOP_LOWER: f32 = 56.;
 const KEY_TARGET_W: f32 = 30.;
 const KEY_TARGET_H: f32 = 30.;
 const KEY_HOTSPOT_DOT: f32 = 12.;
@@ -287,7 +291,8 @@ impl Render for FunctionRowView {
                 .and_then(|record| keyboard_glow(state, record))
         });
 
-        let viewport_h = f32::from(window.viewport_size().height);
+        let viewport = window.viewport_size();
+        let viewport_h = f32::from(viewport.height);
         let image_path = asset.map(|asset| asset.image_path.clone());
         let surface = key_surface(asset, known_keypad);
         let keypad = matches!(surface, KeySurface::Keypad(_));
@@ -301,14 +306,22 @@ impl Render for FunctionRowView {
             .map_or((0., 0.), |asset| {
                 asset_dimensions_for_png(asset, keypad_canvas().1, 360.)
             });
-        let render_size = if keypad_photo {
-            keypad_photo_render_size(asset, viewport_h)
-        } else {
-            keyboard_render_size(asset, viewport_h)
-        };
         let last_page = self.sync_edit_scope(state);
         let pal = theme::palette(cx);
         let slots = key_slots_from_layouts(surface, state, self.keypad_page);
+        let render_size = if keypad_photo {
+            keypad_photo_render_size(asset, viewport_h)
+        } else {
+            let markers: Vec<(f32, f32)> = slots
+                .iter()
+                .map(|slot| (slot.x_frac, slot.y_frac))
+                .collect();
+            keyboard_render_size(
+                asset,
+                viewport_h,
+                keyboard_max_width(f32::from(viewport.width), side_bands_width(&markers)),
+            )
+        };
 
         // A stale selection can outlive a device switch to a shorter F-row;
         // drop it instead of indexing past the new slot list.
@@ -424,17 +437,26 @@ fn binding_line(
         )
 }
 
-/// The keyboard render size: the actual PNG aspect at up to [`KEYBOARD_W`]
-/// wide, shrunk to fit the viewport height. Sizing off the real aspect keeps
+/// The widest the render may get. A board without cards beside it keeps
+/// [`KEYBOARD_W`]. One with them gives up as much width as keeps the whole
+/// pane inside the Keys tab, but never more than the pane would have
+/// overflowed with the render alone, so the band never makes it wider.
+fn keyboard_max_width(viewport_w: f32, side_bands_w: f32) -> f32 {
+    let room = (viewport_w - KEYS_HORIZONTAL_RESERVE).max(KEYBOARD_W);
+    KEYBOARD_W.min(room - side_bands_w)
+}
+
+/// The keyboard render size: the actual PNG aspect at up to `max_w` wide,
+/// shrunk to fit the viewport height. Sizing off the real aspect keeps
 /// `ObjectFit::Contain` from letterboxing and keeps the marker overlays
 /// registered with the rendered keys — the G513 render (with wrist rest) is
 /// nearly twice as tall as an MX Keys render at the same width.
-fn keyboard_render_size(asset: Option<&ResolvedAsset>, viewport_h: f32) -> (f32, f32) {
+fn keyboard_render_size(asset: Option<&ResolvedAsset>, viewport_h: f32, max_w: f32) -> (f32, f32) {
     let Some(asset) = asset.filter(|a| a.png_height > 0) else {
         return FALLBACK_KEYBOARD_SIZE;
     };
     let target_h = (viewport_h - KEYS_VERTICAL_RESERVE - CALLOUT_BAND_H).max(KEYBOARD_MIN_IMG_H);
-    asset_dimensions_for_png(asset, target_h, KEYBOARD_W)
+    asset_dimensions_for_png(asset, target_h, max_w)
 }
 
 /// One key with its resolved layout + binding.
@@ -645,16 +667,23 @@ impl RenderOnce for KeyboardPane {
         let selected = self.selected;
         let hovered = self.hovered;
         let pal = theme::palette(cx);
+        let markers: Vec<(f32, f32)> = self
+            .slots
+            .iter()
+            .map(|slot| (slot.x_frac, slot.y_frac))
+            .collect();
+        let layout = callout_layout(&markers, img_w, img_h);
+        let image_left = layout.image_left;
 
         div()
             .relative()
-            .w(px(img_w))
+            .w(px(layout.pane_w))
             .h(px(CALLOUT_BAND_H + img_h))
             .child(
             div()
                 .absolute()
                 .top(px(CALLOUT_BAND_H))
-                .left(px(0.))
+                .left(px(image_left))
                 .w(px(img_w))
                 .h(px(img_h))
                 // The keyboard's RGB paints *behind* the render, so the opaque
@@ -666,22 +695,16 @@ impl RenderOnce for KeyboardPane {
                 })
                     .child(image_or_fallback(img_path, img_w, img_h, &pal)),
             )
-            .child(keyboard_leader_canvas(
-                self.slots.clone(),
-                selected,
-                hovered,
-                (img_w, img_h),
-            ))
+            .child(keyboard_leader_canvas(&layout, selected, hovered, img_h))
             .children({
-                let count = self.slots.len();
                 let view_for_callouts = view_clone.clone();
+                let cards = layout.cards.clone();
                 self.slots.iter().cloned().map(move |slot| {
                     let highlighted = key_is_highlighted(slot.idx, selected, hovered);
                     KeyCallout {
+                        card: cards[slot.idx],
                         slot,
-                        count,
                         highlighted,
-                        img_w,
                         view: view_for_callouts.clone(),
                     }
                 })
@@ -691,7 +714,7 @@ impl RenderOnce for KeyboardPane {
                 div()
                     .absolute()
                     .top(px(CALLOUT_BAND_H))
-                    .left(px(0.))
+                    .left(px(image_left))
                     .w(px(img_w))
                     .h(px(img_h))
                     .children(self.slots.into_iter().map(|slot| {
@@ -702,13 +725,12 @@ impl RenderOnce for KeyboardPane {
     }
 }
 
-/// One callout bubble in the band above the keyboard.
+/// One callout bubble, above its key or beside it (see [`callout_layout`]).
 #[derive(IntoElement)]
 struct KeyCallout {
     slot: KeySlot,
-    count: usize,
+    card: CardRect,
     highlighted: bool,
-    img_w: f32,
     view: Entity<FunctionRowView>,
 }
 
@@ -716,8 +738,7 @@ impl RenderOnce for KeyCallout {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let pal = theme::palette(cx);
         let idx = self.slot.idx;
-        let left = callout_left_px(idx, self.count, self.img_w, KEY_CALLOUT_W);
-        let top = callout_top_px(idx);
+        let CardRect { left, top, width } = self.card;
         let view_hover = self.view.clone();
         let view_click = self.view;
         let binding = self.slot.binding;
@@ -735,7 +756,7 @@ impl RenderOnce for KeyCallout {
             .absolute()
             .top(px(top))
             .left(px(left))
-            .w(px(KEY_CALLOUT_W))
+            .w(px(width))
             .h(px(KEY_CALLOUT_H))
             .px_1()
             .justify_center()
@@ -763,7 +784,7 @@ impl RenderOnce for KeyCallout {
             })
             .child(
                 div()
-                    .max_w(px(KEY_CALLOUT_W - 8.))
+                    .max_w(px(width - 8.))
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .text_caption()
@@ -778,7 +799,7 @@ impl RenderOnce for KeyCallout {
             .child(binding_line(
                 binding,
                 binding_icon,
-                KEY_CALLOUT_W - 8.,
+                width - 8.,
                 highlighted,
                 &pal,
             ))
@@ -859,49 +880,43 @@ fn binding_label(action: Option<&Action>) -> gpui::SharedString {
 }
 
 fn keyboard_leader_canvas(
-    slots: Vec<KeySlot>,
+    layout: &CalloutLayout,
     selected: Option<usize>,
     hovered: Option<usize>,
-    (img_w, img_h): (f32, f32),
+    img_h: f32,
 ) -> impl IntoElement {
-    let guides: Vec<(usize, f32, f32)> =
-        slots.iter().map(|s| (s.idx, s.x_frac, s.y_frac)).collect();
+    let leaders = layout.leaders.clone();
     canvas(
-        move |_bounds, _, _| (guides, selected, hovered),
+        move |_bounds, _, _| (leaders, selected, hovered),
         move |bounds, payload, window, _app| {
-            let (guides, selected, hovered) = payload;
-            paint_keyboard_leaders(bounds, guides, selected, hovered, (img_w, img_h), window);
+            let (leaders, selected, hovered) = payload;
+            paint_keyboard_leaders(bounds, &leaders, selected, hovered, window);
         },
     )
     .absolute()
     .inset_0()
-    .w(px(img_w))
+    .w(px(layout.pane_w))
     .h(px(CALLOUT_BAND_H + img_h))
 }
 
 fn paint_keyboard_leaders(
     bounds: Bounds<gpui::Pixels>,
-    guides: Vec<(usize, f32, f32)>,
+    leaders: &[Vec<(f32, f32)>],
     selected: Option<usize>,
     hovered: Option<usize>,
-    (img_w, img_h): (f32, f32),
     window: &mut Window,
 ) {
-    let count = guides.len();
-    for (idx, x_frac, y_frac) in guides {
+    for (idx, corners) in leaders.iter().enumerate() {
         let highlighted = key_is_highlighted(idx, selected, hovered);
-        let key_x = x_frac * img_w;
-        let key_y = CALLOUT_BAND_H + (y_frac * img_h);
-        let callout_x = callout_center_x(idx, count, img_w);
-        let callout_bottom = callout_top_px(idx) + KEY_CALLOUT_H;
-        let start = bounds.origin + point(px(callout_x), px(callout_bottom));
-        let elbow = bounds.origin + point(px(callout_x), px(CALLOUT_BAND_H - 14.));
-        let end = bounds.origin + point(px(key_x), px(key_y));
-
         let mut path = PathBuilder::stroke(if highlighted { px(2.) } else { px(1.) });
-        path.move_to(start);
-        path.line_to(elbow);
-        path.line_to(end);
+        for (i, &(x, y)) in corners.iter().enumerate() {
+            let corner = bounds.origin + point(px(x), px(y));
+            if i == 0 {
+                path.move_to(corner);
+            } else {
+                path.line_to(corner);
+            }
+        }
         if let Ok(path) = path.build() {
             if highlighted {
                 window.paint_path(path, rgb(ACCENT_BLUE));
@@ -920,44 +935,12 @@ fn key_is_highlighted(idx: usize, selected: Option<usize>, hovered: Option<usize
     selected == Some(idx) || hovered == Some(idx)
 }
 
-/// Callout bubbles lay out *evenly* across the pane instead of over their
-/// keys: a dense F-row (a G513 packs Esc-F12 into half the render width)
-/// would otherwise stack the bubbles into an overlapping wall. The leader
-/// lines fan from each bubble down to its true key position.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "idx/count index the function row — at most a couple of dozen keys"
-)]
-fn callout_center_x(idx: usize, count: usize, image_w: f32) -> f32 {
-    let margin = KEY_CALLOUT_W / 2.0 + 4.0;
-    if count <= 1 {
-        return image_w / 2.0;
-    }
-    margin + (idx as f32) * (image_w - 2.0 * margin) / ((count - 1) as f32)
-}
-
-fn callout_left_px(idx: usize, count: usize, image_w: f32, callout_w: f32) -> f32 {
-    (callout_center_x(idx, count, image_w) - callout_w / 2.0).clamp(0.0, image_w - callout_w)
-}
-
 fn key_target_left_px(x_frac: f32, img_w: f32, target_w: f32) -> f32 {
     (x_frac * img_w - target_w / 2.0).clamp(0.0, img_w - target_w)
 }
 
 fn key_target_top_px(y_frac: f32, img_h: f32, target_h: f32) -> f32 {
     (y_frac * img_h - target_h / 2.0).clamp(0.0, img_h - target_h)
-}
-
-fn callout_top_px(idx: usize) -> f32 {
-    if callout_lane_is_lower(idx) {
-        KEY_CALLOUT_TOP_LOWER
-    } else {
-        KEY_CALLOUT_TOP_UPPER
-    }
-}
-
-fn callout_lane_is_lower(idx: usize) -> bool {
-    idx.is_multiple_of(2)
 }
 
 fn binding_after_pick(current: Option<&Action>, picked: Action) -> Option<Action> {
