@@ -24,6 +24,7 @@
 //! keys sit is the product's identity fact, owned by
 //! [`openlogi_device_registry::keypad`].
 
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use openlogi_core::binding::GridKey;
@@ -32,7 +33,7 @@ use openlogi_device_registry::keypad::PanelPoint;
 use tokio::sync::oneshot;
 use tracing::debug;
 
-use super::{HidppOperation, WriteError};
+use super::{HidppOperation, WriteError, write_whole_raw_report};
 use crate::keypad_vendor::{VendorFunction, input_payload, output_header};
 use crate::{DeviceRoute, SharedChannel};
 
@@ -110,31 +111,17 @@ pub async fn write_key_image_on(
 
     let channel = shared.channel();
     let (ack_tx, ack_rx) = oneshot::channel();
-    let ack_tx = std::sync::Mutex::new(Some(ack_tx));
+    let ack_tx = Mutex::new(Some(ack_tx));
     let _ack_listener = channel.add_raw_report_listener_guarded(move |report| {
         if let Some(ack) = image_ack(report, ack_part)
-            && let Some(tx) = ack_tx.lock().ok().and_then(|mut slot| slot.take())
+            && let Some(tx) = ack_tx.lock().unwrap_or_else(PoisonError::into_inner).take()
         {
             let _ = tx.send(ack);
         }
     });
 
     for packet in &packets {
-        let written = channel
-            .write_raw_report(packet)
-            .await
-            .map_err(|error| match error {
-                hidpp::channel::ChannelError::Timeout => WriteError::RequestTimedOut {
-                    operation: HidppOperation::WriteKeyImage,
-                },
-                other => WriteError::Hidpp(format!("{other:?}")),
-            })?;
-        if written != packet.len() {
-            return Err(WriteError::Hidpp(format!(
-                "key image report wrote {written} of {} bytes",
-                packet.len()
-            )));
-        }
+        write_whole_raw_report(channel, packet, HidppOperation::WriteKeyImage).await?;
     }
     tokio::time::timeout(ACK_TIMEOUT, ack_rx)
         .await
