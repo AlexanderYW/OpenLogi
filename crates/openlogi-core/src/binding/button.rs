@@ -5,6 +5,7 @@ use std::fmt;
 use std::num::NonZeroU8;
 use std::str::FromStr;
 
+use num_enum::TryFromPrimitive;
 use openlogi_device_registry::keypad::{KeyPosition, MX_CREATIVE_KEYPAD_GRID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
@@ -344,32 +345,33 @@ impl fmt::Display for ButtonId {
 /// Keypad's LCD keys, whose identity is their position because, unlike
 /// `0x1b04` controls, they carry no control ID.
 ///
-/// The variants declare the firmware's own numbering: row-major from the
+/// The discriminants are the firmware's own numbering: row-major from the
 /// top-left, so [`index`](Self::index) is exactly the byte the vendor report
 /// carries. That pinning was verified by a mapping run of the
 /// `openlogi-hid` grid-key probe (`crates/openlogi-hid/examples/mx_keypad_grid_probe.rs`,
 /// 2026-10): pressing the keys in physical row-major order reported the index
 /// sequence `1..=9`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[repr(u8)]
 pub enum GridKey {
     /// Row-major index 1.
-    TopLeft,
+    TopLeft = 1,
     /// Row-major index 2.
-    TopMiddle,
+    TopMiddle = 2,
     /// Row-major index 3.
-    TopRight,
+    TopRight = 3,
     /// Row-major index 4.
-    MiddleLeft,
+    MiddleLeft = 4,
     /// Row-major index 5.
-    Middle,
+    Middle = 5,
     /// Row-major index 6.
-    MiddleRight,
+    MiddleRight = 6,
     /// Row-major index 7.
-    BottomLeft,
+    BottomLeft = 7,
     /// Row-major index 8.
-    BottomMiddle,
+    BottomMiddle = 8,
     /// Row-major index 9.
-    BottomRight,
+    BottomRight = 9,
 }
 
 impl GridKey {
@@ -399,34 +401,13 @@ impl GridKey {
     /// The 1-based index the device's vendor report carries for this key.
     #[must_use]
     pub const fn index(self) -> u8 {
-        match self {
-            Self::TopLeft => 1,
-            Self::TopMiddle => 2,
-            Self::TopRight => 3,
-            Self::MiddleLeft => 4,
-            Self::Middle => 5,
-            Self::MiddleRight => 6,
-            Self::BottomLeft => 7,
-            Self::BottomMiddle => 8,
-            Self::BottomRight => 9,
-        }
+        self as u8
     }
 
     /// The key with `index` as its wire index, or `None` off the grid.
     #[must_use]
-    pub const fn from_index(index: u8) -> Option<Self> {
-        match index {
-            1 => Some(Self::TopLeft),
-            2 => Some(Self::TopMiddle),
-            3 => Some(Self::TopRight),
-            4 => Some(Self::MiddleLeft),
-            5 => Some(Self::Middle),
-            6 => Some(Self::MiddleRight),
-            7 => Some(Self::BottomLeft),
-            8 => Some(Self::BottomMiddle),
-            9 => Some(Self::BottomRight),
-            _ => None,
-        }
+    pub fn from_index(index: u8) -> Option<Self> {
+        Self::try_from(index).ok()
     }
 
     /// The persisted name, `grid` + the CamelCase position.
