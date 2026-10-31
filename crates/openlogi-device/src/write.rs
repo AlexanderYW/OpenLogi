@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use hidpp::{
-    channel::HidppChannel,
+    channel::{ChannelError, HidppChannel},
     device::Device,
     feature::{CreatableFeature, disable_keys::DisableKeysFeature},
 };
@@ -31,6 +31,7 @@ mod fn_lock;
 mod force_sensing;
 mod haptic;
 mod hires_wheel;
+mod key_display;
 mod lighting;
 mod litra;
 mod onboard;
@@ -73,6 +74,7 @@ pub use hires_wheel::{
     get_scroll_wheel_mode_on, set_scroll_inversion, set_scroll_inversion_on, set_scroll_resolution,
     set_scroll_resolution_on, set_scroll_wheel_mode, set_scroll_wheel_mode_on,
 };
+pub use key_display::{KeyDisplay, KeyImageJpeg, key_display_for, write_key_image_on};
 pub use lighting::{
     LightingMethod, LightingWrite, RgbControlLease, release_rgb_control, set_keyboard_color,
     set_keyboard_color_on, set_keyboard_color_with, set_keyboard_color_with_on,
@@ -178,6 +180,34 @@ where
     match open_route_channel(backend, route).await? {
         Some(channel) => f(channel).await,
         None => Err(WriteError::DeviceNotFound),
+    }
+}
+
+/// Write `report` whole through `channel`'s raw-report path, for the report
+/// widths an HID++ message cannot carry — the per-key lighting frame and the
+/// keypad's image write.
+///
+/// A transport timeout is `operation`'s [`WriteError::RequestTimedOut`]. A
+/// short write is an error too: the device acts only on a complete report.
+pub(crate) async fn write_whole_raw_report(
+    channel: &HidppChannel,
+    report: &[u8],
+    operation: HidppOperation,
+) -> Result<(), WriteError> {
+    let written = channel
+        .write_raw_report(report)
+        .await
+        .map_err(|error| match error {
+            ChannelError::Timeout => WriteError::RequestTimedOut { operation },
+            other => WriteError::Hidpp(format!("{other:?}")),
+        })?;
+    if written == report.len() {
+        Ok(())
+    } else {
+        Err(WriteError::Hidpp(format!(
+            "{operation:?} report wrote {written} of {} bytes",
+            report.len()
+        )))
     }
 }
 
