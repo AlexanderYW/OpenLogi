@@ -7,8 +7,6 @@ use std::{error::Error, io};
 use async_hid::{AsyncHidRead, AsyncHidWrite, DeviceInfo, DeviceReader, DeviceWriter};
 #[cfg(target_os = "windows")]
 use futures_lite::StreamExt as _;
-#[cfg(test)]
-use hidpp::channel::LONG_REPORT_ID;
 use hidpp::channel::SHORT_REPORT_ID;
 #[cfg(target_os = "windows")]
 use hidpp::{
@@ -28,9 +26,6 @@ use super::windows_hid::NativeHidWriter;
 
 #[cfg(target_os = "windows")]
 use super::HID_BACKEND;
-
-#[cfg(test)]
-const VERY_LONG_REPORT_ID: u8 = 0x12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReportEndpoint {
@@ -375,7 +370,12 @@ fn copy_report(
 
 #[cfg(test)]
 mod tests {
+    use hidpp::channel::LONG_REPORT_ID;
+
     use super::*;
+
+    /// Logitech's very-long HID++ lighting report.
+    const VERY_LONG_REPORT_ID: u8 = 0x12;
 
     #[test]
     fn report_ids_select_their_windows_endpoint() {
