@@ -232,6 +232,8 @@ pub enum ProfileIdentityField {
     RawHidAddressIdentity,
     /// Raw-HID settings-route identity.
     RawHidRouteIdentity,
+    /// The device identity a direct settings route carries.
+    DirectRouteIdentity,
 }
 
 impl FixtureManifest {
@@ -600,10 +602,11 @@ fn validate_occurrence(
                     ProfileIdentityField::ReceiverIdentity | ProfileIdentityField::ReceiverRoute
                 ) | (
                     SyntheticIdentityKind::DeviceUnitId,
-                    ProfileIdentityField::DeviceUnitId
+                    ProfileIdentityField::DeviceUnitId | ProfileIdentityField::DirectRouteIdentity
                 ) | (
                     SyntheticIdentityKind::DeviceSerialNumber,
                     ProfileIdentityField::DeviceSerialNumber
+                        | ProfileIdentityField::DirectRouteIdentity
                 ) | (
                     SyntheticIdentityKind::RawHidProfileIdentity,
                     ProfileIdentityField::RawHidAddressIdentity

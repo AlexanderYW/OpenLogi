@@ -221,6 +221,7 @@ impl super::AppState {
         let DeviceRoute::Direct {
             vendor_id,
             product_id,
+            ..
         } = DeviceStableId::direct_route_of_key(link)?
         else {
             return None;

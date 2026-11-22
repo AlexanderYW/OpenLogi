@@ -649,12 +649,31 @@ pub(super) fn stable_id(dev: &AgentDevice) -> DeviceStableId {
     )
 }
 
+/// A route as the lifecycle comparison sees it. A direct route's `identity`
+/// is derived from the same `0x0003` fields the checks below compare directly,
+/// so an enrichment of it is not replacement evidence — a twin, whose fields
+/// genuinely differ, is still told apart by the unit-id and serial checks.
+fn route_for_lifecycle(route: Option<&DeviceRoute>) -> Option<DeviceRoute> {
+    route.map(|route| match route {
+        DeviceRoute::Direct {
+            vendor_id,
+            product_id,
+            ..
+        } => DeviceRoute::Direct {
+            vendor_id: *vendor_id,
+            product_id: *product_id,
+            identity: None,
+        },
+        other => other.clone(),
+    })
+}
+
 /// Whether two snapshots still describe the same device lifecycle. Receiver
 /// slots can be reused by another physical device without changing their
 /// stable ID. Missing identity fields are not replacement evidence: a later
 /// probe can enrich them while requests and confirmation budgets remain live.
 pub(super) fn same_device_lifecycle(previous: &AgentDevice, next: &AgentDevice) -> bool {
-    if previous.route != next.route
+    if route_for_lifecycle(previous.route.as_ref()) != route_for_lifecycle(next.route.as_ref())
         || (previous.unit_id != [0; 4]
             && next.unit_id != [0; 4]
             && previous.unit_id != next.unit_id)

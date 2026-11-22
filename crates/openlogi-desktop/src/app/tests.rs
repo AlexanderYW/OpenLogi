@@ -421,12 +421,8 @@ fn connection_icon_matches_route() {
         receiver_uid: "r".into(),
         slot: 1,
     };
-    // Firmware transport tables (HID++ 0x0003): a wired-only device (G513),
-    // a Bluetooth-capable one (MX Master on a cable or BT), and BLE-direct.
-    let wired = DeviceTransports {
-        usb: true,
-        ..DeviceTransports::default()
-    };
+    // Firmware transport tables (HID++ 0x0003): a Bluetooth-capable device
+    // (MX Master on a cable or BT), and BLE-direct.
     let bt = DeviceTransports {
         usb: true,
         bluetooth: true,
@@ -444,43 +440,11 @@ fn connection_icon_matches_route() {
         connection_glyph(Some(&uni), None, None, None),
         ConnectionGlyph::Unifying
     );
-    // The matching USB PID selects the cable icon.
-    let direct_wired_pid = DeviceRoute::Direct {
-        vendor_id: 0x046d,
-        product_id: 0xb019,
-    };
-    assert_eq!(
-        connection_glyph(
-            Some(&direct_wired_pid),
-            None,
-            Some(&model_with_pids(wired, &[0xb019])),
-            None
-        ),
-        ConnectionGlyph::Cable
-    );
-    // eQuad is receiver-only, so an equad-only table on a *direct* route
-    // still means a cable — not Bluetooth.
-    let equad_only = DeviceTransports {
-        equad: true,
-        ..DeviceTransports::default()
-    };
-    let direct_equad_pid = DeviceRoute::Direct {
-        vendor_id: 0x046d,
-        product_id: 0xb01a,
-    };
-    assert_eq!(
-        connection_glyph(
-            Some(&direct_equad_pid),
-            None,
-            Some(&model_with_pids(equad_only, &[0xb01a])),
-            None
-        ),
-        ConnectionGlyph::Cable
-    );
     // An all-false table is "unknown", not "wired".
     let direct_unknown_pid = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xffff,
+        identity: None,
     };
     assert_eq!(
         connection_glyph(
@@ -520,6 +484,51 @@ fn connection_icon_matches_route() {
     assert_eq!(
         connection_glyph(None, None, None, None),
         ConnectionGlyph::Unknown
+    );
+}
+
+/// A matching live product id selects the cable icon on a direct route —
+/// even when the transport table is eQuad-only, which on a *direct* route
+/// still means a cable, not Bluetooth.
+#[test]
+fn connection_icon_matches_live_product_id_on_direct_routes() {
+    // Firmware transport tables (HID++ 0x0003): a wired-only device (G513)
+    // and an eQuad-only one.
+    let wired = DeviceTransports {
+        usb: true,
+        ..DeviceTransports::default()
+    };
+    let equad_only = DeviceTransports {
+        equad: true,
+        ..DeviceTransports::default()
+    };
+    let direct_wired_pid = DeviceRoute::Direct {
+        vendor_id: 0x046d,
+        product_id: 0xb019,
+        identity: None,
+    };
+    assert_eq!(
+        connection_glyph(
+            Some(&direct_wired_pid),
+            None,
+            Some(&model_with_pids(wired, &[0xb019])),
+            None
+        ),
+        ConnectionGlyph::Cable
+    );
+    let direct_equad_pid = DeviceRoute::Direct {
+        vendor_id: 0x046d,
+        product_id: 0xb01a,
+        identity: None,
+    };
+    assert_eq!(
+        connection_glyph(
+            Some(&direct_equad_pid),
+            None,
+            Some(&model_with_pids(equad_only, &[0xb01a])),
+            None
+        ),
+        ConnectionGlyph::Cable
     );
 }
 
@@ -590,10 +599,12 @@ fn connection_icon_follows_live_route_on_multi_transport_device() {
     let usb_direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc356,
+        identity: None,
     };
     let btle_direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb38a,
+        identity: None,
     };
     assert_eq!(
         connection_glyph(Some(&usb_direct), None, Some(&model), None).path(),
@@ -791,6 +802,7 @@ fn live_bluetooth_icon_does_not_use_a_saved_usb_transport() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb389,
+        identity: None,
     };
     assert_eq!(
         connection_glyph(
@@ -1118,6 +1130,7 @@ fn home_transport_icon_paints_in_its_transport_color(cx: &mut gpui::TestAppConte
     let bluetooth = routed(DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     });
     let lightspeed = DeviceRecord {
         receiver_brand: Some(ReceiverBrand::Lightspeed),
@@ -1587,6 +1600,7 @@ fn receiver_slot_is_named_only_for_receiver_routes() {
     direct.route = Some(DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc083,
+        identity: None,
     });
     direct.slot = 0xff;
     assert_eq!(receiver_slot_label(&direct), None);

@@ -28,6 +28,7 @@ pub use openlogi_device_registry::receiver::{
 use serde::{Deserialize, Serialize};
 
 use crate::device::{DeviceInventory, RawDeviceAddress};
+use crate::device_order::DeviceIdentity;
 
 /// HID++ device index that addresses a directly-attached device's own
 /// features (USB-cable or Bluetooth, no receiver indirection).
@@ -58,13 +59,18 @@ pub enum DeviceRoute {
     },
     /// Attached straight to the host over USB cable or Bluetooth, addressed at
     /// the HID++ self-index. Re-found by matching the HID node's vendor/product
-    /// id — two identical mice on one host are indistinguishable here, so the
-    /// first match wins (acceptable for v0).
+    /// id, then — among same-model nodes — the device's own HID++ identity, so
+    /// two identical keypads on one host are two routes.
     Direct {
         /// USB/HID vendor ID of the direct device.
         vendor_id: u16,
         /// USB/HID product ID of the direct device.
         product_id: u16,
+        /// The device's serial or unit id ([`DeviceIdentity::physical`]), or
+        /// `None` for a device that reports neither — the one case two
+        /// same-model nodes still cannot be told apart, and the first wins.
+        #[serde(default)]
+        identity: Option<DeviceIdentity>,
     },
     /// Standalone raw-HID device, such as a Litra light. The identity is an
     /// opaque transport-generated value used to disambiguate duplicate HID
@@ -128,8 +134,10 @@ impl From<&RawDeviceAddress> for DeviceRoute {
 }
 
 impl DeviceRoute {
-    /// Whether two receiver routes use the same physical HID transport.
-    /// Direct routes cannot prove identity because they carry only VID/PID.
+    /// Whether two routes use the same physical HID transport: two slots of
+    /// one receiver, or one direct device both routes name by its identity.
+    /// A direct route without an identity carries only VID/PID, which cannot
+    /// prove it is the same device.
     #[must_use]
     pub fn shares_transport(&self, other: &Self) -> bool {
         match (self, other) {
@@ -151,6 +159,12 @@ impl DeviceRoute {
                     ..
                 },
             ) => left.eq_ignore_ascii_case(right),
+            (
+                Self::Direct {
+                    identity: Some(_), ..
+                },
+                Self::Direct { .. },
+            ) => self == other,
             _ => false,
         }
     }
@@ -176,6 +190,7 @@ impl DeviceRoute {
         let Self::Direct {
             vendor_id,
             product_id,
+            ..
         } = self
         else {
             return None;
@@ -224,6 +239,14 @@ impl DeviceRoute {
             None if slot == DIRECT_DEVICE_INDEX => Some(Self::Direct {
                 vendor_id: inv.receiver.vendor_id,
                 product_id: inv.receiver.product_id,
+                identity: inv
+                    .paired
+                    .iter()
+                    .find(|paired| paired.slot == slot)
+                    .and_then(|paired| paired.model_info.as_ref())
+                    .and_then(|model| {
+                        DeviceIdentity::physical(model.serial_number.as_deref(), model.unit_id)
+                    }),
             }),
             None => None,
         }
@@ -239,7 +262,14 @@ impl fmt::Display for DeviceRoute {
             Self::Direct {
                 vendor_id,
                 product_id,
-            } => write!(f, "direct {vendor_id:04x}:{product_id:04x}"),
+                identity,
+            } => {
+                write!(f, "direct {vendor_id:04x}:{product_id:04x}")?;
+                match identity {
+                    Some(identity) => write!(f, " ({})", identity.key()),
+                    None => Ok(()),
+                }
+            }
             Self::RawHid {
                 vendor_id,
                 product_id,
@@ -258,7 +288,10 @@ impl fmt::Display for DeviceRoute {
 mod tests {
     use std::assert_matches;
 
-    use crate::device::{DeviceInventory, ReceiverInfo};
+    use crate::device::{
+        DeviceInventory, DeviceKind, DeviceModelInfo, DeviceTransports, PairedDevice, ReceiverInfo,
+    };
+    use crate::device_order::DeviceIdentity;
 
     use super::{
         DIRECT_DEVICE_INDEX, DeviceRoute, RECEIVERS, ReceiverProtocol, receiver_display_name,
@@ -326,9 +359,83 @@ mod tests {
             route,
             Some(DeviceRoute::Direct {
                 vendor_id: 0x046d,
-                product_id: 0xb025
+                product_id: 0xb025,
+                ..
             })
         );
+    }
+
+    /// A wired keypad whose `0x0003` reports `serial` and `unit_id`.
+    fn wired_keypad(serial: Option<&str>, unit_id: [u8; 4]) -> DeviceInventory {
+        let mut inventory = inv(0xc354, None);
+        inventory.paired.push(PairedDevice {
+            slot: DIRECT_DEVICE_INDEX,
+            codename: Some("MX Keypad".into()),
+            wpid: None,
+            kind: DeviceKind::Numpad,
+            online: true,
+            battery: None,
+            model_info: Some(DeviceModelInfo {
+                entity_count: 1,
+                serial_number: serial.map(str::to_string),
+                unit_id,
+                transports: DeviceTransports::default(),
+                model_ids: [0xc354, 0, 0],
+                extended_model_id: 0,
+            }),
+            capabilities: None,
+            settings_revision: 0,
+            hidpp10: false,
+        });
+        inventory
+    }
+
+    #[test]
+    fn identical_wired_devices_get_routes_naming_their_own_identity() {
+        let first = DeviceRoute::for_slot(&wired_keypad(Some("SER-A"), [1, 2, 3, 4]), 0xff);
+        let second = DeviceRoute::for_slot(&wired_keypad(Some("SER-B"), [1, 2, 3, 4]), 0xff);
+        assert_ne!(first, second, "same model, two devices, two routes");
+        assert_matches!(
+            first,
+            Some(DeviceRoute::Direct {
+                product_id: 0xc354,
+                identity: Some(DeviceIdentity::Serial(ref serial)),
+                ..
+            }) if serial == "ser-a"
+        );
+
+        // No serial: the unit id names the device; neither: nothing does.
+        assert_matches!(
+            DeviceRoute::for_slot(&wired_keypad(None, [1, 2, 3, 4]), 0xff),
+            Some(DeviceRoute::Direct {
+                identity: Some(DeviceIdentity::Unit([1, 2, 3, 4])),
+                ..
+            })
+        );
+        assert_matches!(
+            DeviceRoute::for_slot(&wired_keypad(Some(""), [0; 4]), 0xff),
+            Some(DeviceRoute::Direct { identity: None, .. })
+        );
+    }
+
+    #[test]
+    fn a_direct_route_shares_a_transport_only_with_the_device_it_names() {
+        let route = |identity| DeviceRoute::Direct {
+            vendor_id: 0x046d,
+            product_id: 0xc354,
+            identity,
+        };
+        let first = route(Some(DeviceIdentity::Unit([1, 2, 3, 4])));
+        let second = route(Some(DeviceIdentity::Unit([5, 6, 7, 8])));
+
+        assert!(first.shares_transport(&first.clone()));
+        assert!(!first.shares_transport(&second));
+        assert!(
+            !route(None).shares_transport(&route(None)),
+            "VID/PID alone cannot prove two routes reach one device"
+        );
+        assert_eq!(first.to_string(), "direct 046d:c354 (unit:01020304)");
+        assert_eq!(route(None).to_string(), "direct 046d:c354");
     }
 
     #[test]
@@ -360,6 +467,7 @@ mod tests {
         let keypad = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc354,
+            identity: None,
         };
         assert_eq!(
             keypad.keypad().map(|keypad| keypad.name),
@@ -370,6 +478,7 @@ mod tests {
         let other = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc548,
+            identity: None,
         };
         assert_eq!(other.keypad(), None);
         let paired = DeviceRoute::Bolt {

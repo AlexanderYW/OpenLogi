@@ -355,6 +355,7 @@ async fn wheel_and_backlight_reads_preserve_route_and_support_errors() {
     let unknown = DeviceRoute::Direct {
         vendor_id: 0xffff,
         product_id: 0xffff,
+        identity: None,
     };
     assert!(matches!(
         agent
@@ -531,6 +532,7 @@ async fn profile_backed_support_and_route_errors_remain_typed() {
             DeviceRoute::Direct {
                 vendor_id: 0xffff,
                 product_id: 0xffff,
+                identity: None,
             },
         )
         .await;
@@ -630,6 +632,7 @@ fn unpairing_drops_the_slot_from_the_rendered_inventory() {
     let direct = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     };
     assert_eq!(state.unpair(&direct), Err(PairingFailure::ReceiverNotFound));
 }
@@ -727,9 +730,14 @@ async fn easy_switch_names_are_kept_and_rejected_renames_change_nothing() {
         "a refused rename leaves the kept name in place"
     );
 
+    // The route the canonical profile's wired mouse publishes: its own
+    // unit id, as every direct route now names its device.
     let direct_mouse = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb020,
+        identity: Some(openlogi_core::device_order::DeviceIdentity::Unit([
+            79, 76, 68, 3,
+        ])),
     };
     assert_eq!(
         agent

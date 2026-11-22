@@ -522,6 +522,7 @@ mod tests {
             litra_model_for_route(&DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc900,
+                identity: None,
             }),
             None
         );

@@ -125,10 +125,12 @@ fn restore_keeps_the_kernels_m650_side_button_diversion() {
     let m650 = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb02a,
+        identity: None,
     };
     let other = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     };
     let restore = |cid, diverted, route: &DeviceRoute| {
         ArmedReporting::pointer(cid, reporting(diverted, None), PointerDivert::Plain)

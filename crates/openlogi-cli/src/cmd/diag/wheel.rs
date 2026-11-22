@@ -32,7 +32,9 @@ pub struct WheelArgs {
 
     /// Run against the device whose name contains this string
     /// (case-insensitive) instead of auto-selecting.
-    #[arg(long, value_name = "NAME")]
+    /// An exact route as the device list prints it — `direct 046d:c354
+    /// (serial:…)` — picks one of two identical devices.
+    #[arg(long, value_name = "NAME|ROUTE")]
     pub device: Option<String>,
 }
 

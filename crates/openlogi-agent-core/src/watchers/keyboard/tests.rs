@@ -11,6 +11,7 @@ fn target() -> KeyboardTarget {
         route: DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc548,
+            identity: None,
         },
     }
 }
@@ -31,6 +32,7 @@ fn keypad_route() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc354,
+        identity: None,
     }
 }
 
@@ -225,6 +227,7 @@ fn target_changes_freeze_dispatch_until_teardown_finishes() {
         route: DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xc52b,
+            identity: None,
         },
     };
     let new_dispatch = dispatch(Action::ShowDesktop);

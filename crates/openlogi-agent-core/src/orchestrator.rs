@@ -953,10 +953,11 @@ impl Orchestrator {
     /// — and re-arms diversion on the device's `0x1d4b` reconnection
     /// broadcast.
     ///
-    /// Two inventory entries can share a route — a direct route names a
-    /// VID/PID, so two identical wired devices are indistinguishable there.
-    /// One that captures keys for the app in front wins that route over one
-    /// that captures keys only for other apps, then the online one, then
+    /// Two inventory entries can still share a route: a direct route names
+    /// its device by serial or unit id, and a device that reports neither is
+    /// left with only its VID/PID. One that captures keys for the app in
+    /// front wins that route over one that captures keys only for other
+    /// apps, then the online one, then
     /// inventory order.
     fn keyboard_specs_for(&self) -> Vec<KeyboardSpec> {
         let candidates = self

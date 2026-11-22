@@ -18,9 +18,13 @@ struct Keyboard {
 
 impl Keyboard {
     async fn publish(shared: &SharedHandles) -> Self {
+        // The route the orchestrator derives for `direct_inventory(None,
+        // [1, 2, 3, 4])`: the scripted channel must sit on that exact route,
+        // identity included, or the device never finds it.
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: Some(DeviceIdentity::Unit([1, 2, 3, 4])),
         };
         Self::publish_on(shared, route).await
     }
@@ -712,7 +716,17 @@ async fn offline_reload_invalidates_queued_policy_without_replacement() {
             .insert("direct:046d:b35b".into(), LinkConfig::default());
         let mut orchestrator = orchestrator(config.clone());
         let shared = orchestrator.shared();
-        let keyboard = Keyboard::publish(&shared).await;
+        // This fixture reports neither serial nor unit id, so the route the
+        // orchestrator derives for it carries no identity.
+        let keyboard = Keyboard::publish_on(
+            &shared,
+            DeviceRoute::Direct {
+                vendor_id: 0x046d,
+                product_id: 0xb35b,
+                identity: None,
+            },
+        )
+        .await;
         let mut inventory = direct_inventory(None, [0; 4]);
         inventory.receiver.product_id = 0xb35b;
         inventory.paired[0].kind = DeviceKind::Keyboard;

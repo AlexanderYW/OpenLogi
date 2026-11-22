@@ -839,6 +839,7 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let context = DisableKeysRequestContext {
             key: DeviceKey::from("keyboard"),
@@ -861,6 +862,7 @@ mod tests {
         let other_route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35c,
+            identity: None,
         };
         assert!(!transaction_fences_match(
             Some(&other_route),

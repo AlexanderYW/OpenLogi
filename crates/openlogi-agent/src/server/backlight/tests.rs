@@ -53,6 +53,7 @@ impl Keyboard {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let enabled = StdMutex::new(true);
         let fail_confirmation = Arc::new(AtomicBool::new(false));

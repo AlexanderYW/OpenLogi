@@ -1248,12 +1248,14 @@ mod tests {
         let route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb35b,
+            identity: None,
         };
         let observable = Arc::new(ObservableState::new("test".to_string()));
         let shared = Orchestrator::new(Config::default(), observable).shared();
         let generic_route = DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb023,
+            identity: None,
         };
         let (generic, generic_reports) = publish_scripted_channel(
             &shared.channel_registry,
@@ -1348,6 +1350,7 @@ mod tests {
             Some(openlogi_hid::DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xb042,
+                identity: None,
             }),
         );
         player.end_session(1);

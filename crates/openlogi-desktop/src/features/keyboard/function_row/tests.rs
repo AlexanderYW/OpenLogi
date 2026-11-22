@@ -15,6 +15,7 @@ fn mx_keypad() -> Option<&'static KeypadDescriptor> {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xc354,
+        identity: None,
     }
     .keypad()
 }

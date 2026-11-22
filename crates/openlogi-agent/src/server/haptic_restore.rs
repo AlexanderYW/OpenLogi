@@ -166,6 +166,7 @@ mod tests {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb042,
+            identity: None,
         }
     }
 
@@ -173,6 +174,7 @@ mod tests {
         DeviceRoute::Direct {
             vendor_id: 0x046d,
             product_id: 0xb034,
+            identity: None,
         }
     }
 

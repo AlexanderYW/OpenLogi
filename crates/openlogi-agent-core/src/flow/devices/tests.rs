@@ -157,6 +157,7 @@ fn join_prefers_the_online_record_of_a_device_seen_on_two_routes() {
     bluetooth.route = Some(DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb023,
+        identity: None,
     });
 
     let devices = LocalDevices::join(&config, &[receiver, bluetooth.clone()]);

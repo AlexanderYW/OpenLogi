@@ -13,6 +13,8 @@ use clap::Subcommand;
 use openlogi_core::device::DeviceInventory;
 use openlogi_hid::{DeviceRoute, dump_features};
 
+use crate::cmd::device_query::devices_named;
+
 pub mod battery;
 pub mod controls;
 pub mod dpi;
@@ -124,25 +126,23 @@ fn online_candidates(inventory: &DeviceInventory) -> Vec<Candidate> {
     candidates
 }
 
-/// The one device in `devices` whose name contains `query`,
-/// case-insensitively.
+/// The one device in `devices` that `query` names: the device whose rendered
+/// route it spells out exactly, else the one whose name contains it — as
+/// [`devices_named`] decides.
 ///
 /// When several names contain it, the one whose whole name equals `query`
 /// wins, so "MX Master 3S" still picks that mouse beside an "MX Master 3S for
 /// Mac". Any other ambiguity is an error that lists the matches: a diag that
 /// writes to a device must not pick one of them by enumeration order. So is a
-/// chosen route that another online device shares: two Bluetooth-direct
-/// devices with one vendor/product id have one route, whatever their names.
+/// chosen route that another online device shares: two devices that report
+/// neither serial nor unit id have one route, whatever their names.
 fn select_named_device(devices: &[Candidate], query: &str) -> Result<(DeviceRoute, String)> {
-    let needle = query.to_lowercase();
-    let matches: Vec<&Candidate> = devices
-        .iter()
-        .filter(|c| c.name.to_lowercase().contains(&needle))
-        .collect();
+    let matches = devices_named(devices, query, |c| Some(&c.route), |c| c.name.as_str());
     let chosen = match matches.as_slice() {
         [] => return Err(no_match_err(devices, Some(query))),
         [only] => *only,
         several => {
+            let needle = query.to_lowercase();
             let mut exact = several.iter().filter(|c| c.name.to_lowercase() == needle);
             match (exact.next(), exact.next()) {
                 (Some(only), None) => *only,
@@ -203,7 +203,7 @@ fn no_match_err(devices: &[Candidate], query: Option<&str>) -> anyhow::Error {
         Some(q) => anyhow!("no online device matches `--device {q}`.\n  online devices:\n{list}"),
         None => anyhow!(
             "could not pick a device automatically.\n  online devices:\n{list}\n  \
-             pass --device <name> to choose one."
+             pass --device <name or route> to choose one."
         ),
     }
 }
@@ -211,9 +211,10 @@ fn no_match_err(devices: &[Candidate], query: Option<&str>) -> anyhow::Error {
 /// Pick the device a diag should run against.
 ///
 /// Selection order:
-/// 1. If `query` is set, the one online device whose name contains it
-///    (case-insensitive), as [`select_named_device`] decides — ambiguous
-///    matches are refused.
+/// 1. If `query` is set, the one online device it names — its exact rendered
+///    route, or a name containing it — as [`select_named_device`] decides;
+///    ambiguous matches are refused. The route is what reaches one of two
+///    identical devices, whose names match.
 /// 2. Else, if `required_features` is non-empty, the first online device whose
 ///    HID++ feature table exposes *any* of them. This is what stops a
 ///    mouse-only diag (DPI, SmartShift) from picking a paired keyboard when
@@ -268,6 +269,8 @@ mod tests {
     };
     use openlogi_hid::{DIRECT_DEVICE_INDEX, DeviceRoute};
 
+    use openlogi_core::device_order::DeviceIdentity;
+
     use super::{
         Candidate, no_match_err, online_candidates, select_inventory_device, select_named_device,
     };
@@ -277,9 +280,40 @@ mod tests {
             route: DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id,
+                identity: None,
             },
             name: name.to_string(),
         }
+    }
+
+    /// One of two identical keypads, named by `unit`.
+    fn keypad(unit: u8) -> Candidate {
+        Candidate {
+            route: DeviceRoute::Direct {
+                vendor_id: 0x046d,
+                product_id: 0xc354,
+                identity: Some(DeviceIdentity::Unit([0, 0, 0, unit])),
+            },
+            name: "MX Keypad".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_exact_route_picks_one_of_two_identical_devices() {
+        let devices = [keypad(1), keypad(2)];
+
+        let (route, name) = select_named_device(&devices, "DIRECT 046d:c354 (unit:00000002)")
+            .expect("the second keypad's route names it");
+        assert_eq!(route, keypad(2).route);
+        assert_eq!(name, "MX Keypad");
+        select_named_device(&devices, "keypad")
+            .expect_err("twins share a name, so only a route tells them apart");
+        assert!(
+            select_named_device(&devices, "direct 046d:c354 (unit:00000009)")
+                .expect_err("a route no device carries matches nothing")
+                .to_string()
+                .contains("no online device matches")
+        );
     }
 
     #[test]
@@ -320,7 +354,7 @@ mod tests {
         let err = no_match_err(&devices, None).to_string();
 
         assert!(err.contains("could not pick a device automatically"));
-        assert!(err.contains("pass --device <name> to choose one"));
+        assert!(err.contains("pass --device <name or route> to choose one"));
         assert!(err.contains("MX Master 3S"));
     }
 
@@ -427,6 +461,7 @@ mod tests {
             DeviceRoute::Direct {
                 vendor_id: 0x046d,
                 product_id: 0xc095,
+                identity: None,
             }
         );
         assert_eq!(candidates[0].route.device_index(), DIRECT_DEVICE_INDEX);

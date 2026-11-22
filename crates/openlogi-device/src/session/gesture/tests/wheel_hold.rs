@@ -209,6 +209,7 @@ async fn restore_hands_the_wheel_back_to_the_firmware() {
     let route = DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb034,
+        identity: None,
     };
     let (armed, channel, handle) = arm(DIVERTABLE_RAW_WHEEL, false).await;
     let registry = ChannelRegistry::default();
@@ -237,6 +238,7 @@ fn m650_route() -> DeviceRoute {
     DeviceRoute::Direct {
         vendor_id: 0x046d,
         product_id: 0xb02a,
+        identity: None,
     }
 }
 
